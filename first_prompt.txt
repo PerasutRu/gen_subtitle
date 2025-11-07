@@ -1,0 +1,17 @@
+ต้องการสร้าง app ที่ upload file vdo (เสียงไทย) เช่น mp4 mov เป็นต้น แล้วแกะเสียงทำ subtitle เป็นหลายภาษา อิงตาม timestamp โดย output เป็น file srt มีรายละเอียดดังนี้
+
+1. เมื่อ user upload file vdo ให้ convert เป็น mp3 ก่อน (เมื่อเสร็จสามารถ download mp3 ได้)
+
+2. เมื่อได้ mp3 ให้ใช้ ASR ของ openai ชื่อ gpt-4o-mini-transcribe แกะ text พร้อม timestamp ออกมา (เมื่อเสร็จสามารถ download srt file ได้) และสามารถ edit ผลลัพธ์ที่ออกมาจาก ASR ก่อนได้
+
+3. ใช้ openai model ชื่อ gpt-4.1-mini เพื่อแปลภาษาตามที่กำหนด (ได้แก่ อังกฤษ ลาว พม่า กัมพูชา เวียดนาม) โดยพยายามให้ความยาวพอ ๆ กับต้นฉบับ และสามารถใส่ prompt กำกับ style ได้ ให้รักษารูปแบบของ srt file ไว้ด้วย (เมื่อเสร็จสามารถ download srt file ได้)
+
+
+
+Features:
+
+1. ทำ frontend ให้สวย ๆ ใช้งานง่าย
+
+2. Backend ใช้ python ทำเป็น API ดี ๆ เผื่อใช้กับอันอื่นด้วย
+
+3. ทำ .env ให้ใส่ api key ของ openai ให้ด้วย
