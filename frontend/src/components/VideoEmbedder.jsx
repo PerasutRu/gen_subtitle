@@ -104,7 +104,7 @@ const VideoEmbedder = ({ fileData, availableLanguages }) => {
 
               {/* Hard Subtitle Section */}
               <div className="mb-4">
-                <h5 className="text-sm font-medium text-gray-700 mb-2">Hard Subtitle (เผาลงในวิดีโอ)</h5>
+                <h5 className="text-sm font-medium text-gray-700 mb-2">Hard Subtitle (ฝังลงในวิดีโอ)</h5>
                 <div className="flex flex-col space-y-2">
                   <button
                     onClick={() => embedSubtitles(language.code, 'hard')}
