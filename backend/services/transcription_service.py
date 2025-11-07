@@ -25,7 +25,7 @@ class TranscriptionService:
                         file=audio_file,
                         response_format="verbose_json",
                         timestamp_granularities=["segment"],
-                        language="th"
+                        # language="th"
                     )
 
                 transcript = await loop.run_in_executor(None, transcribe_audio)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download, Languages, AlertCircle, Loader, CheckCircle2 } from 'lucide-react'
+import { Download, Languages, AlertCircle, Loader, CheckCircle2, RefreshCw } from 'lucide-react'
 import axios from 'axios'
 import VideoEmbedder from './VideoEmbedder'
 
@@ -26,6 +26,20 @@ const TranslationPanel = ({ fileData }) => {
         return [...prev, languageCode]
       }
     })
+  }
+
+  const retranslateLanguage = (languageCode) => {
+    // Remove from translations to allow re-translation
+    setTranslations(prev => {
+      const newTranslations = { ...prev }
+      delete newTranslations[languageCode]
+      return newTranslations
+    })
+    
+    // Add back to selected languages if not already there
+    if (!selectedLanguages.includes(languageCode)) {
+      setSelectedLanguages(prev => [...prev, languageCode])
+    }
   }
 
   const translateToLanguage = async (languageCode) => {
@@ -87,6 +101,9 @@ const TranslationPanel = ({ fileData }) => {
       {/* Language Selection Grid */}
       <div className="card">
         <h4 className="font-semibold text-gray-900 mb-4">เลือกภาษาที่ต้องการแปล</h4>
+        <p className="text-sm text-gray-600 mb-4">
+          คลิกที่ภาษาเพื่อเลือก (สามารถเลือกภาษาที่แปลแล้วเพื่อแปลใหม่ได้)
+        </p>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           {languages.map((language) => {
             const isSelected = selectedLanguages.includes(language.code)
@@ -96,15 +113,15 @@ const TranslationPanel = ({ fileData }) => {
             return (
               <button
                 key={language.code}
-                onClick={() => !hasTranslation && !isTranslating && toggleLanguageSelection(language.code)}
-                disabled={hasTranslation || isTranslating}
+                onClick={() => !isTranslating && toggleLanguageSelection(language.code)}
+                disabled={isTranslating}
                 className={`p-4 rounded-lg border-2 transition-all duration-200 ${
                   hasTranslation
-                    ? 'border-green-500 bg-green-50 cursor-default'
+                    ? 'border-green-500 bg-green-50 hover:border-green-600'
                     : isSelected
                     ? 'border-primary-500 bg-primary-50'
                     : 'border-gray-300 hover:border-primary-300 hover:bg-gray-50'
-                } ${(hasTranslation || isTranslating) ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                } ${isTranslating ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
               >
                 <div className="flex flex-col items-center space-y-2">
                   <span className="text-3xl">{language.flag}</span>
@@ -154,15 +171,20 @@ const TranslationPanel = ({ fileData }) => {
                     value={stylePrompts[languageCode] || ''}
                     onChange={(e) => handleStylePromptChange(languageCode, e.target.value)}
                     placeholder="เช่น: แปลให้เป็นทางการ, ใช้คำง่ายๆ, แปลแบบสบายๆ"
-                    className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-100"
                     rows="2"
-                    disabled={isTranslating || hasTranslation}
+                    disabled={isTranslating}
                   />
+                  {hasTranslation && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      💡 คุณสามารถแก้ไข style prompt แล้วกด "แปลใหม่" เพื่อแปลด้วย style ใหม่
+                    </p>
+                  )}
                 </div>
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap gap-3">
-                  {!hasTranslation && (
+                  {!hasTranslation ? (
                     <button
                       onClick={() => translateToLanguage(languageCode)}
                       disabled={isTranslating}
@@ -182,16 +204,23 @@ const TranslationPanel = ({ fileData }) => {
                         </>
                       )}
                     </button>
-                  )}
-
-                  {hasTranslation && (
-                    <button
-                      onClick={() => downloadTranslatedSrt(languageCode)}
-                      className="btn-secondary flex items-center space-x-2"
-                    >
-                      <Download className="h-4 w-4" />
-                      <span>ดาวน์โหลด SRT</span>
-                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => downloadTranslatedSrt(languageCode)}
+                        className="btn-secondary flex items-center space-x-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span>ดาวน์โหลด SRT</span>
+                      </button>
+                      <button
+                        onClick={() => retranslateLanguage(languageCode)}
+                        className="btn-secondary flex items-center space-x-2 border-orange-300 text-orange-700 hover:bg-orange-50"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                        <span>แปลใหม่</span>
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
