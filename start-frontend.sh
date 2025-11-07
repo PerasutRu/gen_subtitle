@@ -6,8 +6,8 @@ cd frontend
 
 # Check if node_modules exists
 if [ ! -d "node_modules" ]; then
-    echo "❌ Node modules not found. Please run setup.sh first."
-    exit 1
+    echo "📦 Installing dependencies..."
+    npm install
 fi
 
 # Start the development server
