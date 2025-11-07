@@ -1,19 +1,22 @@
 import React, { useState } from 'react'
 import VideoUploader from './components/VideoUploader'
 import TranscriptionEditor from './components/TranscriptionEditor'
+import SubtitleEditor from './components/SubtitleEditor'
 import TranslationPanel from './components/TranslationPanel'
 import ProgressTracker from './components/ProgressTracker'
-import { FileVideo, FileText, Languages } from 'lucide-react'
+import { FileVideo, FileText, Edit3, Languages } from 'lucide-react'
 
 function App() {
   const [currentStep, setCurrentStep] = useState(1)
   const [fileData, setFileData] = useState(null)
   const [transcriptionData, setTranscriptionData] = useState(null)
+  const [editedTranscriptionData, setEditedTranscriptionData] = useState(null)
 
   const steps = [
     { id: 1, title: 'อัปโหลดวิดีโอ', icon: FileVideo, completed: false },
     { id: 2, title: 'แกะเสียง', icon: FileText, completed: false },
-    { id: 3, title: 'แปลภาษา', icon: Languages, completed: false }
+    { id: 3, title: 'แก้ไข Subtitle', icon: Edit3, completed: false },
+    { id: 4, title: 'แปลภาษา', icon: Languages, completed: false }
   ]
 
   const handleVideoUploaded = (data) => {
@@ -23,7 +26,12 @@ function App() {
 
   const handleTranscriptionComplete = (data) => {
     setTranscriptionData(data)
-    setCurrentStep(3) // ไป step 3 (แปลภาษา)
+    setCurrentStep(3) // ไป step 3 (แก้ไข subtitle)
+  }
+
+  const handleEditComplete = (data) => {
+    setEditedTranscriptionData(data)
+    setCurrentStep(4) // ไป step 4 (แปลภาษา)
   }
 
   return (
@@ -56,9 +64,17 @@ function App() {
           )}
 
           {currentStep === 3 && transcriptionData && (
-            <TranslationPanel 
+            <SubtitleEditor 
               fileData={fileData}
               transcriptionData={transcriptionData}
+              onEditComplete={handleEditComplete}
+            />
+          )}
+
+          {currentStep === 4 && editedTranscriptionData && (
+            <TranslationPanel 
+              fileData={fileData}
+              transcriptionData={editedTranscriptionData}
             />
           )}
         </div>

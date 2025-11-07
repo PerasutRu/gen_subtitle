@@ -1,6 +1,6 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 import os
 import shutil
 import uuid
@@ -241,6 +241,98 @@ async def download_video_with_subtitles(file_id: str, language: str = "original"
             "Content-Disposition": f"attachment; filename=video_{subtitle_type}_subtitles_{language}.mp4"
         }
     )
+
+@app.get("/stream-video/{file_id}")
+async def stream_video(file_id: str, request: Request):
+    """Stream วิดีโอต้นฉบับสำหรับ video player"""
+    # Find original video file
+    video_files = list(UPLOAD_DIR.glob(f"{file_id}.*"))
+    video_path = None
+    for file_path in video_files:
+        if file_path.suffix.lower() in ['.mp4', '.mov', '.avi', '.mkv', '.wmv']:
+            video_path = file_path
+            break
+    
+    if not video_path or not video_path.exists():
+        raise HTTPException(status_code=404, detail="ไม่พบไฟล์วิดีโอ")
+    
+    # Get file size
+    file_size = video_path.stat().st_size
+    
+    # Handle range requests for video streaming
+    range_header = request.headers.get("range")
+    
+    if range_header:
+        # Parse range header
+        range_match = range_header.replace("bytes=", "").split("-")
+        start = int(range_match[0])
+        end = int(range_match[1]) if range_match[1] else file_size - 1
+        
+        # Read chunk
+        chunk_size = end - start + 1
+        
+        def iterfile():
+            with open(video_path, "rb") as f:
+                f.seek(start)
+                yield f.read(chunk_size)
+        
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+            "Content-Type": "video/mp4",
+        }
+        
+        return StreamingResponse(iterfile(), status_code=206, headers=headers)
+    
+    # Return full file if no range requested
+    return FileResponse(
+        path=video_path,
+        media_type="video/mp4"
+    )
+
+@app.post("/update-srt/{file_id}")
+async def update_srt(file_id: str, request: dict):
+    """อัปเดตไฟล์ SRT ด้วย segments ที่แก้ไขแล้ว"""
+    try:
+        segments = request.get("segments", [])
+        
+        if not segments:
+            raise HTTPException(status_code=400, detail="segments is required")
+        
+        # Generate SRT content from segments
+        srt_content = ""
+        for i, segment in enumerate(segments, 1):
+            start_time = format_srt_time(segment["start"])
+            end_time = format_srt_time(segment["end"])
+            text = segment["text"]
+            
+            srt_content += f"{i}\n"
+            srt_content += f"{start_time} --> {end_time}\n"
+            srt_content += f"{text}\n\n"
+        
+        # Save updated SRT file
+        srt_path = UPLOAD_DIR / f"{file_id}_original.srt"
+        with open(srt_path, 'w', encoding='utf-8') as f:
+            f.write(srt_content)
+        
+        return {
+            "file_id": file_id,
+            "segments_count": len(segments),
+            "srt_path": str(srt_path),
+            "message": "อัปเดต SRT สำเร็จ"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
+
+def format_srt_time(seconds):
+    """แปลงเวลาจาก seconds เป็นรูปแบบ SRT (HH:MM:SS,mmm)"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 if __name__ == "__main__":
     import uvicorn

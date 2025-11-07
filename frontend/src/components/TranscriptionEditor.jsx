@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react'
-import { Download, Play, Edit3, Save, AlertCircle } from 'lucide-react'
+import { Download, Edit3, AlertCircle } from 'lucide-react'
 import axios from 'axios'
 
 const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
   const [transcribing, setTranscribing] = useState(false)
   const [transcription, setTranscription] = useState(null)
-  const [editableText, setEditableText] = useState('')
-  const [isEditing, setIsEditing] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -20,7 +18,6 @@ const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
     try {
       const response = await axios.post(`/api/transcribe/${fileData.file_id}`)
       setTranscription(response.data)
-      setEditableText(response.data.transcription.text)
       onTranscriptionComplete(response.data)
     } catch (err) {
       setError(err.response?.data?.detail || 'เกิดข้อผิดพลาดในการแกะเสียง')
@@ -37,18 +34,9 @@ const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
     window.open(`/api/download-srt/${fileData.file_id}/original`, '_blank')
   }
 
-  const handleSaveEdit = () => {
-    // Here you could implement saving the edited transcription
-    setIsEditing(false)
-    // Update the transcription data with edited text
-    const updatedTranscription = {
-      ...transcription,
-      transcription: {
-        ...transcription.transcription,
-        text: editableText
-      }
-    }
-    setTranscription(updatedTranscription)
+  const handleContinue = () => {
+    // Just pass the data to next step
+    onTranscriptionComplete(transcription)
   }
 
   if (transcribing) {
@@ -83,9 +71,17 @@ const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
+      <div className="card">
+        <h3 className="text-xl font-semibold mb-4">ผลการแกะเสียง</h3>
+        <p className="text-gray-600">
+          ระบบได้แกะเสียงจากวิดีโอเรียบร้อยแล้ว คุณสามารถดาวน์โหลดไฟล์หรือดำเนินการต่อเพื่อแก้ไข subtitle
+        </p>
+      </div>
+
       {/* Download Section */}
       <div className="card">
-        <h3 className="text-xl font-semibold mb-4">ดาวน์โหลดไฟล์</h3>
+        <h3 className="text-lg font-semibold mb-4">ดาวน์โหลดไฟล์</h3>
         <div className="flex flex-wrap gap-4">
           <button
             onClick={downloadMp3}
@@ -104,49 +100,21 @@ const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
         </div>
       </div>
 
-      {/* Transcription Editor */}
+      {/* Transcription Preview */}
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-semibold">ผลการแกะเสียง</h3>
-          <div className="flex space-x-2">
-            {isEditing ? (
-              <button
-                onClick={handleSaveEdit}
-                className="btn-primary flex items-center space-x-2"
-              >
-                <Save className="h-4 w-4" />
-                <span>บันทึก</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="btn-secondary flex items-center space-x-2"
-              >
-                <Edit3 className="h-4 w-4" />
-                <span>แก้ไข</span>
-              </button>
-            )}
-          </div>
+        <h3 className="text-lg font-semibold mb-4">ตัวอย่างข้อความที่แกะได้</h3>
+        
+        <div className="bg-gray-50 p-4 rounded-lg mb-4 max-h-64 overflow-y-auto">
+          <p className="whitespace-pre-wrap text-gray-800 leading-relaxed">
+            {transcription.transcription.text}
+          </p>
         </div>
 
-        {isEditing ? (
-          <textarea
-            value={editableText}
-            onChange={(e) => setEditableText(e.target.value)}
-            className="w-full h-64 p-4 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            placeholder="แก้ไขข้อความที่นี่..."
-          />
-        ) : (
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <p className="whitespace-pre-wrap text-gray-800 leading-relaxed">
-              {editableText}
-            </p>
-          </div>
-        )}
-
         {/* Segments Preview */}
-        <div className="mt-6">
-          <h4 className="font-semibold mb-3">ตัวอย่าง Segments (พร้อม Timestamp)</h4>
+        <div className="mt-4">
+          <h4 className="font-semibold mb-3 text-sm text-gray-700">
+            ตัวอย่าง Segments พร้อม Timestamp ({transcription.transcription.segments.length} รายการ)
+          </h4>
           <div className="max-h-64 overflow-y-auto space-y-2">
             {transcription.transcription.segments.slice(0, 5).map((segment, index) => (
               <div key={index} className="bg-white p-3 rounded border text-sm">
@@ -162,6 +130,25 @@ const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Continue Button */}
+      <div className="card bg-primary-50 border-primary-200">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="font-semibold text-primary-900 mb-1">พร้อมแก้ไข Subtitle แล้วหรือยัง?</h4>
+            <p className="text-primary-700 text-sm">
+              ขั้นตอนถัดไปคุณจะสามารถแก้ไข subtitle แต่ละรายการพร้อมดูวิดีโอประกอบ
+            </p>
+          </div>
+          <button
+            onClick={handleContinue}
+            className="btn-primary flex items-center space-x-2"
+          >
+            <Edit3 className="h-4 w-4" />
+            <span>ดำเนินการต่อ</span>
+          </button>
         </div>
       </div>
     </div>
