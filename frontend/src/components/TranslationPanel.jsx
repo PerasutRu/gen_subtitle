@@ -7,6 +7,7 @@ const TranslationPanel = ({ fileData }) => {
   const [translations, setTranslations] = useState({})
   const [translating, setTranslating] = useState({})
   const [stylePrompts, setStylePrompts] = useState({})
+  const [providers, setProviders] = useState({})
   const [error, setError] = useState(null)
   const [selectedLanguages, setSelectedLanguages] = useState([])
 
@@ -47,11 +48,15 @@ const TranslationPanel = ({ fileData }) => {
     setError(null)
 
     try {
-      const response = await axios.post('/api/translate', {
-        file_id: fileData.file_id,
-        target_language: languageCode,
-        style_prompt: stylePrompts[languageCode] || null
-      })
+      const formData = new FormData()
+      formData.append('file_id', fileData.file_id)
+      formData.append('target_language', languageCode)
+      formData.append('provider', providers[languageCode] || 'openai')
+      if (stylePrompts[languageCode]) {
+        formData.append('style_prompt', stylePrompts[languageCode])
+      }
+
+      const response = await axios.post('/api/translate', formData)
 
       setTranslations(prev => ({
         ...prev,
@@ -72,6 +77,13 @@ const TranslationPanel = ({ fileData }) => {
     setStylePrompts(prev => ({
       ...prev,
       [languageCode]: prompt
+    }))
+  }
+
+  const handleProviderChange = (languageCode, provider) => {
+    setProviders(prev => ({
+      ...prev,
+      [languageCode]: provider
     }))
   }
 
@@ -160,6 +172,39 @@ const TranslationPanel = ({ fileData }) => {
                       <span className="text-sm font-medium">แปลเสร็จสิ้น</span>
                     </div>
                   )}
+                </div>
+
+                {/* Provider Selection */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ผู้ให้บริการแปล
+                  </label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name={`provider-${languageCode}`}
+                        value="openai"
+                        checked={(providers[languageCode] || 'openai') === 'openai'}
+                        onChange={(e) => handleProviderChange(languageCode, e.target.value)}
+                        disabled={isTranslating}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">OpenAI</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name={`provider-${languageCode}`}
+                        value="botnoi"
+                        checked={providers[languageCode] === 'botnoi'}
+                        onChange={(e) => handleProviderChange(languageCode, e.target.value)}
+                        disabled={isTranslating}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">Botnoi</span>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Style Prompt */}

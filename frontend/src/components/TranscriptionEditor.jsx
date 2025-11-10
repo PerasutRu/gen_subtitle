@@ -6,21 +6,24 @@ const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
   const [transcribing, setTranscribing] = useState(false)
   const [transcription, setTranscription] = useState(null)
   const [error, setError] = useState(null)
-
-  useEffect(() => {
-    startTranscription()
-  }, [])
+  const [provider, setProvider] = useState('openai')
+  const [showProviderSelect, setShowProviderSelect] = useState(true)
 
   const startTranscription = async () => {
     setTranscribing(true)
     setError(null)
+    setShowProviderSelect(false)
 
     try {
-      const response = await axios.post(`/api/transcribe/${fileData.file_id}`)
+      const formData = new FormData()
+      formData.append('provider', provider)
+      
+      const response = await axios.post(`/api/transcribe/${fileData.file_id}`, formData)
       setTranscription(response.data)
       onTranscriptionComplete(response.data)
     } catch (err) {
       setError(err.response?.data?.detail || 'เกิดข้อผิดพลาดในการแกะเสียง')
+      setShowProviderSelect(true)
     } finally {
       setTranscribing(false)
     }
@@ -37,6 +40,56 @@ const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
   const handleContinue = () => {
     // Just pass the data to next step
     onTranscriptionComplete(transcription)
+  }
+
+  if (showProviderSelect && !transcription) {
+    return (
+      <div className="card">
+        <h3 className="text-xl font-semibold mb-4">เลือกผู้ให้บริการแกะเสียง</h3>
+        <p className="text-gray-600 mb-6">
+          เลือกผู้ให้บริการที่คุณต้องการใช้สำหรับการแกะเสียง
+        </p>
+        
+        <div className="space-y-4 mb-6">
+          <label className="flex items-center p-4 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+            <input
+              type="radio"
+              name="provider"
+              value="openai"
+              checked={provider === 'openai'}
+              onChange={(e) => setProvider(e.target.value)}
+              className="mr-3 h-4 w-4"
+            />
+            <div>
+              <div className="font-semibold">OpenAI Whisper</div>
+              <div className="text-sm text-gray-600">รองรับหลายภาษา ความแม่นยำสูง</div>
+            </div>
+          </label>
+          
+          <label className="flex items-center p-4 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+            <input
+              type="radio"
+              name="provider"
+              value="botnoi"
+              checked={provider === 'botnoi'}
+              onChange={(e) => setProvider(e.target.value)}
+              className="mr-3 h-4 w-4"
+            />
+            <div>
+              <div className="font-semibold">Botnoi Gensub</div>
+              <div className="text-sm text-gray-600">เหมาะสำหรับภาษาไทย</div>
+            </div>
+          </label>
+        </div>
+        
+        <button
+          onClick={startTranscription}
+          className="btn-primary w-full"
+        >
+          เริ่มแกะเสียงด้วย {provider === 'openai' ? 'OpenAI' : 'Botnoi'}
+        </button>
+      </div>
+    )
   }
 
   if (transcribing) {

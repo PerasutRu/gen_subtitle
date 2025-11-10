@@ -12,6 +12,7 @@ from typing import List, Optional
 from services.video_processor import VideoProcessor
 from services.transcription_service import TranscriptionService
 from services.translation_service import TranslationService
+from services.botnoi_service import BotnoiService
 from models.subtitle_models import SubtitleResponse, TranslationRequest
 
 load_dotenv()
@@ -31,6 +32,13 @@ app.add_middleware(
 video_processor = VideoProcessor()
 transcription_service = TranscriptionService()
 translation_service = TranslationService()
+
+# Initialize Botnoi service (optional)
+botnoi_service = None
+try:
+    botnoi_service = BotnoiService()
+except ValueError:
+    print("Botnoi service not initialized (BOTNOI_API_KEY not found)")
 
 # Create upload directory
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
@@ -88,20 +96,31 @@ async def download_mp3(file_id: str):
     )
 
 @app.post("/transcribe/{file_id}")
-async def transcribe_audio(file_id: str):
-    """แกะเสียงจากไฟล์ MP3 เป็นข้อความพร้อม timestamp"""
+async def transcribe_audio(file_id: str, provider: str = Form("openai")):
+    """แกะเสียงจากไฟล์ MP3 เป็นข้อความพร้อม timestamp
+    
+    Args:
+        file_id: ID ของไฟล์
+        provider: ผู้ให้บริการ ('openai' หรือ 'botnoi')
+    """
     try:
         mp3_path = UPLOAD_DIR / f"{file_id}.mp3"
         
         if not mp3_path.exists():
             raise HTTPException(status_code=404, detail="ไม่พบไฟล์ MP3")
         
-        print(f"Starting transcription for file: {mp3_path}")  # Add logging
+        print(f"Starting transcription for file: {mp3_path} with provider: {provider}")
         
-        # Transcribe audio
-        result = await transcription_service.transcribe_with_timestamps(mp3_path)
+        # Select service based on provider
+        if provider.lower() == "botnoi":
+            if not botnoi_service:
+                raise HTTPException(status_code=400, detail="Botnoi service ไม่พร้อมใช้งาน กรุณาตั้งค่า BOTNOI_API_KEY")
+            result = await botnoi_service.transcribe_with_timestamps(mp3_path)
+        else:
+            # Default to OpenAI
+            result = await transcription_service.transcribe_with_timestamps(mp3_path)
         
-        print(f"Transcription completed, saving SRT file")  # Add logging
+        print(f"Transcription completed, saving SRT file")
         
         # Save SRT file
         srt_path = UPLOAD_DIR / f"{file_id}_original.srt"
@@ -109,43 +128,85 @@ async def transcribe_audio(file_id: str):
         
         return {
             "file_id": file_id,
+            "provider": provider,
             "transcription": result,
             "srt_path": str(srt_path),
-            "message": "แกะเสียงสำเร็จ"
+            "message": f"แกะเสียงสำเร็จด้วย {provider}"
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Transcription API error: {str(e)}")  # Add logging
+        print(f"Transcription API error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
 
 @app.post("/translate")
-async def translate_subtitles(request: TranslationRequest):
-    """แปลซับไตเติ้ลเป็นภาษาต่างๆ"""
+async def translate_subtitles(
+    file_id: str = Form(...),
+    target_language: str = Form(...),
+    style_prompt: Optional[str] = Form(None),
+    provider: str = Form("openai")
+):
+    """แปลซับไตเติ้ลเป็นภาษาต่างๆ
+    
+    Args:
+        file_id: ID ของไฟล์
+        target_language: ภาษาเป้าหมาย
+        style_prompt: คำแนะนำสไตล์การแปล (optional)
+        provider: ผู้ให้บริการ ('openai' หรือ 'botnoi')
+    """
     try:
-        srt_path = UPLOAD_DIR / f"{request.file_id}_original.srt"
+        srt_path = UPLOAD_DIR / f"{file_id}_original.srt"
         
         if not srt_path.exists():
             raise HTTPException(status_code=404, detail="ไม่พบไฟล์ SRT ต้นฉบับ")
         
-        # Translate subtitles
-        translated_srt = await translation_service.translate_srt(
-            srt_path, 
-            request.target_language,
-            request.style_prompt
-        )
+        # Parse SRT file
+        segments = transcription_service.parse_srt_file(srt_path)
+        
+        # Translate based on provider
+        if provider.lower() == "botnoi":
+            if not botnoi_service:
+                raise HTTPException(status_code=400, detail="Botnoi service ไม่พร้อมใช้งาน กรุณาตั้งค่า BOTNOI_API_KEY")
+            translated_segments = await botnoi_service.translate_segments(
+                segments, 
+                target_language,
+                style_prompt
+            )
+        else:
+            # Use OpenAI translation service
+            translated_srt = await translation_service.translate_srt(
+                srt_path, 
+                target_language,
+                style_prompt
+            )
+            # Save and return
+            output_path = UPLOAD_DIR / f"{file_id}_{target_language}.srt"
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(translated_srt)
+            
+            return {
+                "file_id": file_id,
+                "target_language": target_language,
+                "provider": provider,
+                "translated_srt_path": str(output_path),
+                "message": f"แปลเป็น {target_language} สำเร็จด้วย {provider}"
+            }
+        
+        # For Botnoi, generate SRT from translated segments
+        translated_srt = transcription_service._generate_srt_content(translated_segments)
         
         # Save translated SRT
-        output_path = UPLOAD_DIR / f"{request.file_id}_{request.target_language}.srt"
+        output_path = UPLOAD_DIR / f"{file_id}_{target_language}.srt"
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(translated_srt)
         
         return {
-            "file_id": request.file_id,
-            "target_language": request.target_language,
+            "file_id": file_id,
+            "target_language": target_language,
+            "provider": provider,
             "translated_srt_path": str(output_path),
-            "message": f"แปลเป็น{request.target_language}สำเร็จ"
+            "message": f"แปลเป็น {target_language} สำเร็จด้วย {provider}"
         }
         
     except Exception as e:
