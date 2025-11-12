@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 class VideoProcessor:
     def __init__(self):
-        self.executor = ThreadPoolExecutor(max_workers=2)
+        self.executor = ThreadPoolExecutor(max_workers=4)  # Increased workers
         self.thai_fonts = self._get_thai_fonts()
     
     def _get_thai_fonts(self):
@@ -51,8 +51,35 @@ class VideoProcessor:
         except Exception as e:
             raise Exception(f"การแปลงไฟล์ล้มเหลว: {str(e)}")
     
-    async def embed_subtitles(self, video_path: Path, srt_path: Path, output_path: Path) -> Path:
-        """ฝัง subtitle เข้ากับวิดีโอด้วย ffmpeg"""
+    async def embed_subtitles(
+        self, 
+        video_path: Path, 
+        srt_path: Path, 
+        output_path: Path, 
+        speed_preset: str = "balanced",
+        font_name: str = "TH Sarabun New",
+        font_size: int = 20,
+        bold: bool = True,
+        outline: float = 1.5,
+        shadow: float = 1.0,
+        font_color: str = "white",
+        outline_color: str = "black"
+    ) -> Path:
+        """ฝัง subtitle เข้ากับวิดีโอด้วย ffmpeg พร้อมตัวเลือกการปรับแต่งฟอนต์
+        
+        Args:
+            video_path: ไฟล์วิดีโอต้นฉบับ
+            srt_path: ไฟล์ subtitle
+            output_path: ไฟล์ output
+            speed_preset: ความเร็วในการ encode ('fast', 'balanced', 'quality')
+            font_name: ชื่อฟอนต์ (default: TH Sarabun New - รองรับภาษาไทย)
+            font_size: ขนาดฟอนต์ (default: 20)
+            bold: ตัวหนา (default: True)
+            outline: ความหนาของขอบ (default: 1.5)
+            shadow: ความเข้มของเงา (default: 1.0)
+            font_color: สีตัวอักษร (default: white)
+            outline_color: สีขอบ (default: black)
+        """
         try:
             # Run embedding in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -61,7 +88,15 @@ class VideoProcessor:
                 self._embed_subtitles_ffmpeg,
                 str(video_path),
                 str(srt_path),
-                str(output_path)
+                str(output_path),
+                speed_preset,
+                font_name,
+                font_size,
+                bold,
+                outline,
+                shadow,
+                font_color,
+                outline_color
             )
             
             return output_path
@@ -69,34 +104,108 @@ class VideoProcessor:
         except Exception as e:
             raise Exception(f"ไม่สามารถฝัง subtitle ได้: {str(e)}")
     
-    def _embed_subtitles_ffmpeg(self, video_path: str, srt_path: str, output_path: str):
-        """Helper function to embed subtitles using ffmpeg - optimized for speed"""
+    def _embed_subtitles_ffmpeg(
+        self, 
+        video_path: str, 
+        srt_path: str, 
+        output_path: str,
+        speed_preset: str = "balanced",
+        font_name: str = "TH Sarabun New",
+        font_size: int = 20,
+        bold: bool = True,
+        outline: float = 1.5,
+        shadow: float = 1.0,
+        font_color: str = "white",
+        outline_color: str = "black"
+    ):
+        """Helper function to embed subtitles using ffmpeg - with customizable Thai font support"""
+        import time
+        start_time = time.time()
+        
+        # Speed preset configurations
+        preset_configs = {
+            "fast": {
+                "ffmpeg_preset": "ultrafast",
+                "crf": "25",
+                "timeout": 180,
+                "description": "เร็วที่สุด (คุณภาพปานกลาง)"
+            },
+            "balanced": {
+                "ffmpeg_preset": "veryfast",
+                "crf": "23",
+                "timeout": 300,
+                "description": "สมดุล (แนะนำ)"
+            },
+            "quality": {
+                "ffmpeg_preset": "fast",
+                "crf": "20",
+                "timeout": 600,
+                "description": "คุณภาพสูง (ช้ากว่า)"
+            }
+        }
+        
+        config = preset_configs.get(speed_preset, preset_configs["balanced"])
+        
+        # Color mapping for ASS format (AABBGGRR)
+        color_map = {
+            "white": "&H00FFFFFF",
+            "black": "&H00000000",
+            "yellow": "&H0000FFFF",
+            "cyan": "&H00FFFF00",
+            "green": "&H0000FF00",
+            "magenta": "&H00FF00FF",
+            "red": "&H000000FF",
+            "blue": "&H00FF0000"
+        }
+        
+        primary_color = color_map.get(font_color.lower(), "&H00FFFFFF")
+        outline_col = color_map.get(outline_color.lower(), "&H00000000")
+        bold_value = 1 if bold else 0
+        
         try:
-            # Fast and simple subtitle style for Thai text
-            simple_style = (
-                "FontSize=24,"              # Good readable size
-                "PrimaryColour=&Hffffff,"   # White text
-                "OutlineColour=&H000000,"   # Black outline
-                "Outline=2,"                # Simple outline
-                "Alignment=2,"              # Bottom center
-                "MarginV=30"                # Bottom margin
+            print(f"\n{'='*60}")
+            print(f"Starting subtitle embedding...")
+            print(f"Video: {video_path}")
+            print(f"SRT: {srt_path}")
+            print(f"Output: {output_path}")
+            print(f"Speed Preset: {speed_preset} - {config['description']}")
+            print(f"Font Settings: {font_name}, Size: {font_size}, Bold: {bold}")
+            print(f"Outline: {outline}, Shadow: {shadow}")
+            print(f"{'='*60}\n")
+            
+            # Subtitle style with customizable Thai font support
+            # Using ASS format for better Thai language support
+            subtitle_style = (
+                f"subtitles='{srt_path}':force_style='"
+                f"FontName={font_name},"          # ฟอนต์ที่รองรับภาษาไทย
+                f"FontSize={font_size},"          # ขนาดฟอนต์
+                f"PrimaryColour={primary_color}," # สีตัวอักษร
+                f"OutlineColour={outline_col},"   # สีขอบ
+                f"BackColour=&H80000000,"         # พื้นหลังโปร่งแสง
+                f"Bold={bold_value},"             # ตัวหนา
+                f"Outline={outline},"             # ความหนาของขอบ
+                f"Shadow={shadow},"               # เงา
+                f"MarginV=20,"                    # ระยะห่างจากขอบล่าง
+                f"Alignment=2"                    # จัดกลางด้านล่าง
+                "'"
             )
             
-            # Fast ffmpeg command - prioritize speed over quality
             cmd = [
                 'ffmpeg',
                 '-i', video_path,
-                '-vf', f"subtitles='{srt_path}':force_style='{simple_style}'",
-                '-c:a', 'copy',             # Copy audio (no re-encoding)
-                '-c:v', 'libx264',          # Video codec
-                '-preset', 'ultrafast',     # Fastest encoding preset
-                '-crf', '23',               # Balanced quality/speed
-                '-threads', '0',            # Use all available CPU cores
-                '-y',                       # Overwrite output
+                '-vf', subtitle_style,             # ใช้สไตล์ที่ปรับแต่งได้
+                '-c:a', 'copy',                    # Copy audio (no re-encoding)
+                '-c:v', 'libx264',                 # Video codec
+                '-preset', config['ffmpeg_preset'], # Speed preset
+                '-crf', config['crf'],             # Quality
+                '-threads', '0',                   # Use all available CPU cores
+                '-y',                              # Overwrite output
                 output_path
             ]
             
-            print(f"Running fast ffmpeg command for subtitle embedding...")
+            print(f"Running ffmpeg with customized subtitle style...")
+            print(f"Font: {font_name}, Size: {font_size}, Bold: {bold}, Outline: {outline}, Shadow: {shadow}")
+            print(f"Using preset: {config['ffmpeg_preset']}, CRF: {config['crf']}")
             
             # Run ffmpeg command with timeout
             result = subprocess.run(
@@ -104,93 +213,44 @@ class VideoProcessor:
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=600  # 10 minute timeout
+                timeout=config['timeout']
             )
             
-            print(f"Fast ffmpeg completed successfully")
+            elapsed_time = time.time() - start_time
+            print(f"\n{'='*60}")
+            print(f"✅ Subtitle embedding completed successfully!")
+            print(f"⏱️  Time taken: {elapsed_time:.2f} seconds")
+            print(f"{'='*60}\n")
             
         except subprocess.TimeoutExpired:
-            print("ffmpeg timeout - trying simpler method")
-            self._embed_subtitles_simple(video_path, srt_path, output_path)
+            print("ffmpeg timeout - trying faster preset")
+            if speed_preset != "fast":
+                self._embed_subtitles_ffmpeg(
+                    video_path, srt_path, output_path, "fast",
+                    font_name, font_size, bold, outline, shadow, font_color, outline_color
+                )
+            else:
+                raise Exception("การฝัง subtitle timeout แม้ใช้ preset เร็วที่สุด")
         except subprocess.CalledProcessError as e:
             print(f"ffmpeg error: {e.stderr}")
-            # Try simpler method
-            try:
-                print("Trying simpler method...")
-                self._embed_subtitles_simple(video_path, srt_path, output_path)
-            except Exception as fallback_error:
+            # Try faster preset if not already using fast
+            if speed_preset != "fast":
+                try:
+                    print("Trying faster preset...")
+                    self._embed_subtitles_ffmpeg(
+                        video_path, srt_path, output_path, "fast",
+                        font_name, font_size, bold, outline, shadow, font_color, outline_color
+                    )
+                except Exception as fallback_error:
+                    raise Exception(f"ffmpeg ล้มเหลว: {e.stderr}")
+            else:
                 raise Exception(f"ffmpeg ล้มเหลว: {e.stderr}")
         except FileNotFoundError:
             raise Exception("ไม่พบ ffmpeg กรุณาติดตั้ง ffmpeg ก่อน")
         except Exception as e:
             raise Exception(f"การฝัง subtitle ล้มเหลว: {str(e)}")
     
-    def _embed_subtitles_simple(self, video_path: str, srt_path: str, output_path: str):
-        """Ultra-simple and fast subtitle embedding"""
-        try:
-            # Minimal ffmpeg command for maximum speed
-            cmd = [
-                'ffmpeg',
-                '-i', video_path,
-                '-vf', f"subtitles='{srt_path}'",  # Use default subtitle style
-                '-c:a', 'copy',                    # Copy audio
-                '-c:v', 'libx264',                 # Video codec
-                '-preset', 'veryfast',             # Very fast preset
-                '-crf', '25',                      # Lower quality for speed
-                '-threads', '0',                   # Use all cores
-                '-y',
-                output_path
-            ]
-            
-            print(f"Running ultra-simple ffmpeg command...")
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=300  # 5 minute timeout
-            )
-            
-            print(f"Simple ffmpeg completed successfully")
-            
-        except Exception as e:
-            print(f"Simple ffmpeg failed: {str(e)}")
-            raise Exception(f"Simple ffmpeg ล้มเหลว: {str(e)}")
-    
-    def _embed_subtitles_fallback(self, video_path: str, srt_path: str, output_path: str):
-        """Fast fallback method for subtitle embedding"""
-        try:
-            # Single fast fallback method
-            cmd = [
-                'ffmpeg',
-                '-i', video_path,
-                '-vf', f"subtitles='{srt_path}'",  # Minimal subtitle filter
-                '-c:a', 'copy',                    # Copy audio
-                '-c:v', 'libx264',                 # Video codec
-                '-preset', 'superfast',            # Fastest preset
-                '-crf', '28',                      # Lower quality for speed
-                '-threads', '0',                   # Use all cores
-                '-y',
-                output_path
-            ]
-            
-            print(f"Running fast fallback method...")
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=180  # 3 minute timeout
-            )
-            
-            print(f"Fast fallback completed successfully")
-            
-        except Exception as e:
-            print(f"Fast fallback failed: {str(e)}")
-            raise Exception(f"Fast fallback ล้มเหลว: {str(e)}")
-    
+
     async def embed_subtitles_soft(self, video_path: Path, srt_path: Path, output_path: Path) -> Path:
         """ฝัง subtitle แบบ soft subtitle (ไม่เผาลงในวิดีโอ)"""
         try:

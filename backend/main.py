@@ -231,11 +231,23 @@ async def download_srt(file_id: str, language: str = "original"):
 
 @app.post("/embed-subtitles")
 async def embed_subtitles(request: dict):
-    """ฝัง subtitle เข้ากับวิดีโอ (hard subtitle)"""
+    """ฝัง subtitle เข้ากับวิดีโอ (hard subtitle) พร้อมตัวเลือกการปรับแต่งฟอนต์"""
     try:
         file_id = request.get("file_id")
         language = request.get("language", "original")
         subtitle_type = request.get("type", "hard")  # "hard" or "soft"
+        
+        # Speed preset option for hard subtitle
+        speed_preset = request.get("speed_preset", "balanced")  # fast, balanced, quality
+        
+        # Font customization options (with defaults)
+        font_name = request.get("font_name", "TH Sarabun New")  # รองรับภาษาไทย
+        font_size = request.get("font_size", 20)  # ขนาดเล็กลง
+        bold = request.get("bold", True)
+        outline = request.get("outline", 1.5)  # ขอบบางลง
+        shadow = request.get("shadow", 1.0)
+        font_color = request.get("font_color", "white")
+        outline_color = request.get("outline_color", "black")
         
         if not file_id:
             raise HTTPException(status_code=400, detail="file_id is required")
@@ -265,12 +277,32 @@ async def embed_subtitles(request: dict):
         if subtitle_type == "soft":
             await video_processor.embed_subtitles_soft(video_path, srt_path, output_path)
         else:
-            await video_processor.embed_subtitles(video_path, srt_path, output_path)
+            await video_processor.embed_subtitles(
+                video_path, srt_path, output_path,
+                speed_preset=speed_preset,
+                font_name=font_name,
+                font_size=font_size,
+                bold=bold,
+                outline=outline,
+                shadow=shadow,
+                font_color=font_color,
+                outline_color=outline_color
+            )
         
         return {
             "file_id": file_id,
             "language": language,
             "type": subtitle_type,
+            "speed_preset": speed_preset if subtitle_type == "hard" else None,
+            "font_settings": {
+                "font_name": font_name,
+                "font_size": font_size,
+                "bold": bold,
+                "outline": outline,
+                "shadow": shadow,
+                "font_color": font_color,
+                "outline_color": outline_color
+            } if subtitle_type == "hard" else None,
             "output_path": str(output_path),
             "output_filename": output_filename,
             "message": f"ฝัง {subtitle_type} subtitle สำเร็จ"
