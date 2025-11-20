@@ -13,7 +13,9 @@ from services.video_processor import VideoProcessor
 from services.transcription_service import TranscriptionService
 from services.translation_service import TranslationService
 from services.botnoi_service import BotnoiService
+from services.session_manager import session_manager
 from models.subtitle_models import SubtitleResponse, TranslationRequest
+from datetime import datetime
 
 load_dotenv()
 
@@ -48,16 +50,104 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 async def root():
     return {"message": "Video Subtitle Generator API"}
 
+@app.get("/limits")
+async def get_limits():
+    """ดึงค่า limits และ quota ปัจจุบัน"""
+    return session_manager.get_limits()
+
+@app.get("/session/{session_id}/usage")
+async def get_session_usage(session_id: str):
+    """ดึงข้อมูลการใช้งานของ session"""
+    usage = session_manager.get_session_usage(session_id)
+    limits = session_manager.get_limits()
+    return {
+        "usage": usage,
+        "limits": limits
+    }
+
+# ==================== Admin Endpoints ====================
+
+@app.get("/admin/sessions")
+async def admin_get_all_sessions():
+    """[Admin] ดึงรายการ session ทั้งหมด"""
+    sessions = session_manager.get_all_sessions()
+    return {
+        "total": len(sessions),
+        "sessions": sessions
+    }
+
+@app.get("/admin/stats")
+async def admin_get_stats():
+    """[Admin] ดึงสถิติการใช้งานทั้งหมด"""
+    stats = session_manager.get_stats()
+    limits = session_manager.get_limits()
+    return {
+        "stats": stats,
+        "limits": limits
+    }
+
+@app.delete("/admin/session/{session_id}")
+async def admin_delete_session(session_id: str):
+    """[Admin] ลบ session เฉพาะ"""
+    success = session_manager.clear_session(session_id)
+    if success:
+        return {"message": f"ลบ session {session_id} สำเร็จ"}
+    else:
+        raise HTTPException(status_code=500, detail="ไม่สามารถลบ session ได้")
+
+@app.post("/admin/reset")
+async def admin_reset_all():
+    """[Admin] Reset ลบ session ทั้งหมด"""
+    success = session_manager.clear_all_sessions()
+    if success:
+        return {
+            "message": "Reset สำเร็จ ลบ session ทั้งหมดแล้ว",
+            "timestamp": datetime.now().isoformat()
+        }
+    else:
+        raise HTTPException(status_code=500, detail="ไม่สามารถ reset ได้")
+
+@app.post("/admin/reload-limits")
+async def admin_reload_limits():
+    """[Admin] โหลดค่า limits ใหม่จาก config file"""
+    session_manager.reload_limits()
+    return {
+        "message": "โหลดค่า limits ใหม่สำเร็จ",
+        "limits": session_manager.get_limits()
+    }
+
 @app.post("/upload-video")
-async def upload_video(file: UploadFile = File(...)):
-    """อัปโหลดไฟล์วิดีโอและแปลงเป็น MP3"""
+async def upload_video(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None)
+):
+    """อัปโหลดไฟล์วิดีโอและแปลงเป็น MP3 พร้อมตรวจสอบ quota"""
     try:
+        # Get or create session
+        if not session_id:
+            session_id = session_manager.get_or_create_session()
+        else:
+            session_manager.get_or_create_session(session_id)
+        
         # Validate file type
-        allowed_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.wmv'}
+        limits = session_manager.get_limits()
         file_extension = Path(file.filename).suffix.lower()
         
-        if file_extension not in allowed_extensions:
-            raise HTTPException(status_code=400, detail="ไฟล์ต้องเป็น MP4, MOV, AVI, MKV หรือ WMV เท่านั้น")
+        if file_extension not in limits["allowedExtensions"]:
+            allowed = ", ".join(limits["allowedExtensions"])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"ไฟล์ต้องเป็น {allowed} เท่านั้น"
+            )
+        
+        # Check file size (read file to get size)
+        file_content = await file.read()
+        file_size_mb = len(file_content) / (1024 * 1024)
+        
+        # Validate file size first (before checking duration)
+        can_upload, error_msg = session_manager.can_upload(session_id, file_size_mb)
+        if not can_upload:
+            raise HTTPException(status_code=400, detail=error_msg)
         
         # Generate unique filename
         file_id = str(uuid.uuid4())
@@ -65,20 +155,57 @@ async def upload_video(file: UploadFile = File(...)):
         
         # Save uploaded file
         with open(video_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(file_content)
+        
+        # Get video duration
+        try:
+            video_info = video_processor.get_video_info(video_path)
+            duration_seconds = video_info["duration"]
+        except Exception as e:
+            print(f"Warning: Could not get video duration: {e}")
+            duration_seconds = 0
+        
+        # Check duration limit
+        if duration_seconds > 0:
+            can_upload, error_msg = session_manager.can_upload(
+                session_id, 
+                file_size_mb, 
+                duration_seconds
+            )
+            if not can_upload:
+                # Remove uploaded file if quota exceeded
+                video_path.unlink()
+                raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Add to session tracking
+        session_manager.add_video(session_id, file_id, file_size_mb, duration_seconds)
         
         # Convert to MP3
         mp3_path = await video_processor.convert_to_mp3(video_path, file_id)
         
+        # Get updated usage
+        usage = session_manager.get_session_usage(session_id)
+        
         return {
             "file_id": file_id,
+            "session_id": session_id,
             "original_filename": file.filename,
             "video_path": str(video_path),
             "mp3_path": str(mp3_path),
+            "duration_seconds": duration_seconds,
+            "file_size_mb": round(file_size_mb, 2),
+            "usage": usage,
             "message": "อัปโหลดและแปลงเป็น MP3 สำเร็จ"
         }
         
+    except HTTPException:
+        # Re-raise HTTPException as-is (don't wrap it)
+        raise
     except Exception as e:
+        # Log the error for debugging
+        print(f"Upload error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
 
 @app.get("/download-mp3/{file_id}")

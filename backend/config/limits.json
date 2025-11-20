@@ -1,0 +1,7 @@
+{
+  "maxVideos": 10,
+  "maxDurationMinutes": 10,
+  "maxFileSizeMB": 500,
+  "allowedFormats": ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska", "video/x-ms-wmv", "video/avi", "video/mov"],
+  "allowedExtensions": [".mp4", ".mov", ".avi", ".mkv", ".wmv"]
+}
