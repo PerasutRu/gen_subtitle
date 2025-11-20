@@ -1,6 +1,7 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import os
 import shutil
 import uuid
@@ -8,16 +9,32 @@ from pathlib import Path
 from dotenv import load_dotenv
 import asyncio
 from typing import List, Optional
+from pydantic import BaseModel
 
 from services.video_processor import VideoProcessor
 from services.transcription_service import TranscriptionService
 from services.translation_service import TranslationService
 from services.botnoi_service import BotnoiService
 from services.session_manager import session_manager
+from services.auth_service import auth_service
+from services.database import db
 from models.subtitle_models import SubtitleResponse, TranslationRequest
 from datetime import datetime
 
 load_dotenv()
+
+# Security
+security = HTTPBearer()
+
+# Pydantic models
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
 
 app = FastAPI(title="Video Subtitle Generator API", version="1.0.0")
 
@@ -46,17 +63,81 @@ except ValueError:
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# ==================== Auth Middleware ====================
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """ตรวจสอบ JWT token และดึงข้อมูล user"""
+    token = credentials.credentials
+    payload = auth_service.verify_token(token)
+    
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    username = payload.get("sub")
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    
+    user = db.get_user(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    return user
+
+async def get_current_admin(current_user: dict = Depends(get_current_user)):
+    """ตรวจสอบว่าเป็น admin หรือไม่"""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+# ==================== Public Endpoints ====================
+
 @app.get("/")
 async def root():
     return {"message": "Video Subtitle Generator API"}
 
+@app.post("/auth/login")
+async def login(request: LoginRequest):
+    """Login และรับ JWT token"""
+    user = db.get_user(request.username)
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    if not auth_service.verify_password(request.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    # สร้าง JWT token
+    access_token = auth_service.create_access_token(
+        data={"sub": user["username"], "role": user["role"]}
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "username": user["username"],
+            "role": user["role"]
+        }
+    }
+
+@app.get("/auth/me")
+async def get_me(current_user: dict = Depends(get_current_user)):
+    """ดึงข้อมูล user ปัจจุบัน"""
+    return {
+        "username": current_user["username"],
+        "role": current_user["role"],
+        "created_at": current_user["created_at"]
+    }
+
+# ==================== Protected Endpoints ====================
+
 @app.get("/limits")
-async def get_limits():
+async def get_limits(current_user: dict = Depends(get_current_user)):
     """ดึงค่า limits และ quota ปัจจุบัน"""
     return session_manager.get_limits()
 
 @app.get("/session/{session_id}/usage")
-async def get_session_usage(session_id: str):
+async def get_session_usage(session_id: str, current_user: dict = Depends(get_current_user)):
     """ดึงข้อมูลการใช้งานของ session"""
     usage = session_manager.get_session_usage(session_id)
     limits = session_manager.get_limits()
@@ -67,8 +148,53 @@ async def get_session_usage(session_id: str):
 
 # ==================== Admin Endpoints ====================
 
+@app.post("/admin/register")
+async def admin_register_user(
+    request: RegisterRequest,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """[Admin] สร้าง user ใหม่"""
+    # Hash password
+    password_hash = auth_service.hash_password(request.password)
+    
+    # สร้าง user
+    success = db.create_user(request.username, password_hash, request.role)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    return {
+        "message": f"สร้าง user {request.username} สำเร็จ",
+        "username": request.username,
+        "role": request.role
+    }
+
+@app.get("/admin/users")
+async def admin_get_users(current_admin: dict = Depends(get_current_admin)):
+    """[Admin] ดึงรายการ user ทั้งหมด"""
+    users = db.get_all_users()
+    return {
+        "total": len(users),
+        "users": users
+    }
+
+@app.delete("/admin/user/{username}")
+async def admin_delete_user(
+    username: str,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """[Admin] ลบ user"""
+    if username == current_admin["username"]:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    success = db.delete_user(username)
+    if success:
+        return {"message": f"ลบ user {username} สำเร็จ"}
+    else:
+        raise HTTPException(status_code=500, detail="ไม่สามารถลบ user ได้")
+
 @app.get("/admin/sessions")
-async def admin_get_all_sessions():
+async def admin_get_all_sessions(current_admin: dict = Depends(get_current_admin)):
     """[Admin] ดึงรายการ session ทั้งหมด"""
     sessions = session_manager.get_all_sessions()
     return {
@@ -77,7 +203,7 @@ async def admin_get_all_sessions():
     }
 
 @app.get("/admin/stats")
-async def admin_get_stats():
+async def admin_get_stats(current_admin: dict = Depends(get_current_admin)):
     """[Admin] ดึงสถิติการใช้งานทั้งหมด"""
     stats = session_manager.get_stats()
     limits = session_manager.get_limits()
@@ -87,7 +213,10 @@ async def admin_get_stats():
     }
 
 @app.delete("/admin/session/{session_id}")
-async def admin_delete_session(session_id: str):
+async def admin_delete_session(
+    session_id: str,
+    current_admin: dict = Depends(get_current_admin)
+):
     """[Admin] ลบ session เฉพาะ"""
     success = session_manager.clear_session(session_id)
     if success:
@@ -96,7 +225,7 @@ async def admin_delete_session(session_id: str):
         raise HTTPException(status_code=500, detail="ไม่สามารถลบ session ได้")
 
 @app.post("/admin/reset")
-async def admin_reset_all():
+async def admin_reset_all(current_admin: dict = Depends(get_current_admin)):
     """[Admin] Reset ลบ session ทั้งหมด"""
     success = session_manager.clear_all_sessions()
     if success:
@@ -108,7 +237,7 @@ async def admin_reset_all():
         raise HTTPException(status_code=500, detail="ไม่สามารถ reset ได้")
 
 @app.post("/admin/reload-limits")
-async def admin_reload_limits():
+async def admin_reload_limits(current_admin: dict = Depends(get_current_admin)):
     """[Admin] โหลดค่า limits ใหม่จาก config file"""
     session_manager.reload_limits()
     return {
@@ -119,7 +248,8 @@ async def admin_reload_limits():
 @app.post("/upload-video")
 async def upload_video(
     file: UploadFile = File(...),
-    session_id: Optional[str] = Form(None)
+    session_id: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
 ):
     """อัปโหลดไฟล์วิดีโอและแปลงเป็น MP3 พร้อมตรวจสอบ quota"""
     try:

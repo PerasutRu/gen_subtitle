@@ -22,12 +22,25 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # ตาราง sessions
+        # ตาราง users
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL
+            )
+        """)
+        
+        # ตาราง sessions (เพิ่ม user_id)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
+                user_id INTEGER,
                 created_at TEXT NOT NULL,
-                last_activity TEXT NOT NULL
+                last_activity TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id)
             )
         """)
         
@@ -50,7 +63,32 @@ class Database:
             ON videos (session_id)
         """)
         
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_username 
+            ON users (username)
+        """)
+        
         conn.commit()
+        
+        # สร้าง admin user เริ่มต้น (ถ้ายังไม่มี)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        admin_count = cursor.fetchone()[0]
+        
+        if admin_count == 0:
+            # สร้าง admin user เริ่มต้น
+            # username: admin, password: admin123
+            from .auth_service import auth_service
+            password_hash = auth_service.hash_password("admin123")
+            now = datetime.now().isoformat()
+            
+            cursor.execute("""
+                INSERT INTO users (username, password_hash, role, created_at)
+                VALUES (?, ?, ?, ?)
+            """, ("admin", password_hash, "admin", now))
+            
+            conn.commit()
+            print("✅ Created default admin user (username: admin, password: admin123)")
+        
         conn.close()
     
     def create_session(self, session_id: str) -> bool:
@@ -285,6 +323,120 @@ class Database:
         except Exception as e:
             print(f"Error getting stats: {e}")
             return {}
+    
+    # ==================== User Management ====================
+    
+    def create_user(self, username: str, password_hash: str, role: str = "user") -> bool:
+        """สร้าง user ใหม่"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            
+            cursor.execute("""
+                INSERT INTO users (username, password_hash, role, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (username, password_hash, role, now))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            # Username already exists
+            return False
+        except Exception as e:
+            print(f"Error creating user: {e}")
+            return False
+    
+    def get_user(self, username: str) -> Optional[Dict]:
+        """ดึงข้อมูล user"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, username, password_hash, role, created_at
+                FROM users
+                WHERE username = ?
+            """, (username,))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return {
+                    "id": row[0],
+                    "username": row[1],
+                    "password_hash": row[2],
+                    "role": row[3],
+                    "created_at": row[4]
+                }
+            return None
+        except Exception as e:
+            print(f"Error getting user: {e}")
+            return None
+    
+    def get_all_users(self) -> List[Dict]:
+        """ดึงรายการ user ทั้งหมด"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, username, role, created_at
+                FROM users
+                ORDER BY created_at DESC
+            """)
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [
+                {
+                    "id": row[0],
+                    "username": row[1],
+                    "role": row[2],
+                    "created_at": row[3]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Error getting users: {e}")
+            return []
+    
+    def delete_user(self, username: str) -> bool:
+        """ลบ user"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("DELETE FROM users WHERE username = ?", (username,))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error deleting user: {e}")
+            return False
+    
+    def update_user_role(self, username: str, role: str) -> bool:
+        """อัปเดต role ของ user"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE users
+                SET role = ?
+                WHERE username = ?
+            """, (role, username))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error updating user role: {e}")
+            return False
 
 # Global instance
 db = Database()
