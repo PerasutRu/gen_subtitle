@@ -74,8 +74,16 @@ def get_session_usage():
         print(f"Error getting usage: {e}")
         return None
 
-def format_quota_display():
-    """Format quota information for display"""
+def format_quota_display(refresh_usage=False):
+    """Format quota information for display
+    
+    Args:
+        refresh_usage: ถ้าเป็น True จะดึงข้อมูล usage ใหม่จาก API
+    """
+    # Refresh usage from API if requested
+    if refresh_usage and session.session_id:
+        get_session_usage()
+    
     if not session.limits:
         get_limits()
     
@@ -87,29 +95,33 @@ def format_quota_display():
     
     # Get limits from config
     max_videos = limits.get('maxVideosPerSession', limits.get('maxVideos', 10))
+    max_file_size_mb = limits.get('maxFileSizeMB', 500)
     
     # Get current usage
     video_count = usage.get('videos_count', 0)
+    remaining_videos = usage.get('remaining_videos', max_videos - video_count)
     
     # Calculate percentage
     video_percent = (video_count / max_videos * 100) if max_videos > 0 else 0
     
-    # Status indicator
+    # Status indicator for videos
     if video_percent < 70:
-        icon = '🟢'
-        status = 'เหลือเยอะ'
+        video_icon = '🟢'
+        video_status = 'เหลือเยอะ'
     elif video_percent < 90:
-        icon = '🟡'
-        status = 'ใกล้เต็ม'
+        video_icon = '🟡'
+        video_status = 'ใกล้เต็ม'
     else:
-        icon = '🔴'
-        status = 'เต็มแล้ว!'
+        video_icon = '🔴'
+        video_status = 'เต็มแล้ว!'
     
     quota_text = f"""
 ## 📊 Quota การใช้งาน
 
 🎬 **จำนวนวิดีโอ:** {video_count}/{max_videos} ไฟล์ ({video_percent:.1f}%)  
-{icon} {status}
+{video_icon} {video_status} (เหลือ {remaining_videos} ไฟล์)
+
+📏 **ขนาดไฟล์สูงสุด:** {max_file_size_mb} MB ต่อไฟล์
 """
     return quota_text
 
@@ -130,6 +142,24 @@ def login(username: str, password: str):
             
             # Get limits after login
             get_limits()
+            
+            # Get user's session (this will retrieve existing session or create new one)
+            try:
+                session_response = requests.get(
+                    f"{API_URL}/user/session",
+                    headers=get_headers()
+                )
+                if session_response.status_code == 200:
+                    session_data = session_response.json()
+                    session.session_id = session_data["session_id"]
+                    session.usage = session_data.get("usage", {})
+                    session.limits = session_data.get("limits", session.limits)
+                    print(f"✅ Loaded session: {session.session_id}, usage: {session.usage}")
+                else:
+                    print(f"⚠️ Could not load session: {session_response.status_code}")
+            except Exception as e:
+                print(f"⚠️ Error loading session: {e}")
+            
             quota_text = format_quota_display()
             
             welcome_msg = f"✅ ยินดีต้อนรับ **{session.user['username']}**!\n\nคุณสามารถเริ่มอัปโหลดวิดีโอได้เลย"
@@ -174,6 +204,25 @@ def logout():
         "",
         ""
     )
+
+def refresh_quota():
+    """Refresh quota display by fetching latest usage from API"""
+    try:
+        if not session.session_id:
+            return "⚠️ ยังไม่มี session กรุณา upload วิดีโอก่อน"
+        
+        # Fetch latest usage from API
+        usage = get_session_usage()
+        
+        if usage is None:
+            return "❌ ไม่สามารถดึงข้อมูล usage ได้"
+        
+        # Format and return updated quota display
+        return format_quota_display(refresh_usage=False)  # Already refreshed by get_session_usage()
+        
+    except Exception as e:
+        print(f"Error refreshing quota: {e}")
+        return f"❌ เกิดข้อผิดพลาด: {str(e)}"
 
 # ==================== Step 1: Upload Video ====================
 
@@ -220,7 +269,12 @@ def upload_video(video_file):
             session.session_id = result['session_id']
             session.video_path = result['video_path']
             session.mp3_path = result['mp3_path']
+            
+            # Update usage from API response
             session.usage = result.get('usage', {})
+            
+            # Refresh quota display with updated usage
+            quota_text = format_quota_display(refresh_usage=False)  # Already have fresh data from upload response
             
             info = f"""
 ✅ **อัปโหลดสำเร็จ!**
@@ -231,7 +285,6 @@ def upload_video(video_file):
 
 🎉 **พร้อมแกะเสียงแล้ว!** ไปที่ Tab "2️⃣ แกะเสียง" เพื่อดำเนินการต่อ
 """
-            quota_text = format_quota_display()
             
             return info, gr.update(visible=True), video_file, result['mp3_path'], quota_text
         else:
@@ -706,14 +759,16 @@ def create_ui():
                 with gr.Column(scale=2):
                     user_display = gr.Markdown("👤 ผู้ใช้งาน")
                 with gr.Column(scale=1):
-                    logout_btn = gr.Button("🚪 ออกจากระบบ", variant="stop", size="sm")
+                    with gr.Row():
+                        refresh_quota_btn = gr.Button("🔄 รีเฟรช Quota", variant="secondary", size="sm", scale=1)
+                        logout_btn = gr.Button("🚪 ออกจากระบบ", variant="stop", size="sm", scale=1)
             
             # Quota Display
             quota_display = gr.Markdown("", label="Quota")
             
-            with gr.Tabs():
+            with gr.Tabs() as tabs:
                 # Tab 1: Upload Video
-                with gr.Tab("1️⃣ อัปโหลดวิดีโอ"):
+                with gr.Tab("1️⃣ อัปโหลดวิดีโอ", id=0):
                     gr.Markdown("""
                     ### 📤 อัปโหลดไฟล์วิดีโอ
                     
@@ -721,7 +776,7 @@ def create_ui():
                     1. เลือกไฟล์วิดีโอจากเครื่องของคุณ
                     2. กดปุ่ม "อัปโหลด"
                     3. รอให้ระบบแปลงเป็น MP3
-                    4. ไปที่ Tab "2️⃣ แกะเสียง" เพื่อดำเนินการต่อ
+                    4. ✅ เมื่อเสร็จแล้วไปที่ Tab "2️⃣ แกะเสียง"
                     """)
                     
                     # Display limits
@@ -748,7 +803,10 @@ def create_ui():
                         audio_preview = gr.Audio(label="ไฟล์ MP3", visible=False)
                 
                 # Tab 2: Transcription
-                with gr.Tab("2️⃣ แกะเสียง") as transcribe_tab:
+                with gr.Tab("2️⃣ แกะเสียง", id=1) as transcribe_tab:
+                    # Warning message if step 1 not completed
+                    step2_warning = gr.Markdown("⚠️ **กรุณาอัปโหลดวิดีโอที่ Tab 1 ก่อน**", visible=True)
+                    
                     transcribe_tab_content = gr.Column(visible=False)
                     with transcribe_tab_content:
                         gr.Markdown("""
@@ -780,7 +838,10 @@ def create_ui():
                             )
                 
                 # Tab 3: Edit Subtitles
-                with gr.Tab("3️⃣ แก้ไข Subtitle") as edit_tab:
+                with gr.Tab("3️⃣ แก้ไข Subtitle", id=2) as edit_tab:
+                    # Warning message if step 2 not completed
+                    step3_warning = gr.Markdown("⚠️ **กรุณาแกะเสียงที่ Tab 2 ก่อน**", visible=True)
+                    
                     edit_tab_content = gr.Column(visible=False)
                     with edit_tab_content:
                         gr.Markdown("""
@@ -838,71 +899,81 @@ def create_ui():
                         edit_status = gr.Markdown("")
                 
                 # Tab 4: Translation
-                with gr.Tab("4️⃣ แปลภาษา"):
-                    gr.Markdown("""
-                    ### 🌍 แปล Subtitle เป็นภาษาอื่น
+                with gr.Tab("4️⃣ แปลภาษา", id=3):
+                    # Warning message if step 3 not completed
+                    step4_warning = gr.Markdown("⚠️ **กรุณาบันทึกการแก้ไข Subtitle ที่ Tab 3 ก่อน**", visible=True)
                     
-                    **ขั้นตอน:**
-                    1. เลือกภาษาเป้าหมาย
-                    2. (ไม่บังคับ) กำหนด Style การแปล
-                    3. กดปุ่ม "แปลภาษา"
-                    4. รอให้ระบบแปล
-                    5. ดาวน์โหลดไฟล์ SRT ที่แปลแล้ว
-                    """)
-                    
-                    with gr.Row():
-                        language_select = gr.Dropdown(
-                            choices=["english", "lao", "burmese", "khmer", "vietnamese"],
-                            label="🌐 เลือกภาษาเป้าหมาย",
-                            value="english",
-                            info="เลือกภาษาที่ต้องการแปล"
+                    step4_content = gr.Column(visible=False)
+                    with step4_content:
+                        gr.Markdown("""
+                        ### 🌍 แปล Subtitle เป็นภาษาอื่น
+                        
+                        **ขั้นตอน:**
+                        1. เลือกภาษาเป้าหมาย
+                        2. (ไม่บังคับ) กำหนด Style การแปล
+                        3. กดปุ่ม "แปลภาษา"
+                        4. รอให้ระบบแปล
+                        5. ดาวน์โหลดไฟล์ SRT ที่แปลแล้ว
+                        """)
+                        
+                        with gr.Row():
+                            language_select = gr.Dropdown(
+                                choices=["english", "lao", "burmese", "khmer", "vietnamese"],
+                                label="🌐 เลือกภาษาเป้าหมาย",
+                                value="english",
+                                info="เลือกภาษาที่ต้องการแปล"
+                            )
+                            provider_translate = gr.Radio(
+                                choices=["botnoi"],
+                                value="botnoi",
+                                label="เลือกผู้ให้บริการ",
+                                info="Botnoi: รองรับหลายภาษา"
+                            )
+                        
+                        style_input = gr.Textbox(
+                            label="🎨 Style Prompt (ไม่บังคับ)",
+                            placeholder="เช่น: แปลเป็นภาษาที่เป็นทางการ, ใช้คำง่ายๆ, แปลแบบสบายๆ",
+                            info="กำหนดสไตล์การแปลตามต้องการ"
                         )
-                        provider_translate = gr.Radio(
-                            choices=["botnoi"],
-                            value="botnoi",
-                            label="เลือกผู้ให้บริการ",
-                            info="Botnoi: รองรับหลายภาษา"
-                        )
-                    
-                    style_input = gr.Textbox(
-                        label="🎨 Style Prompt (ไม่บังคับ)",
-                        placeholder="เช่น: แปลเป็นภาษาที่เป็นทางการ, ใช้คำง่ายๆ, แปลแบบสบายๆ",
-                        info="กำหนดสไตล์การแปลตามต้องการ"
-                    )
-                    
-                    translate_btn = gr.Button("🌍 แปลภาษา", variant="primary", size="lg")
-                    translate_status = gr.Markdown("")
-                    
-                    gr.Markdown("---")
-                    gr.Markdown("### 📥 ดาวน์โหลดไฟล์ SRT")
-                    
-                    with gr.Row():
-                        download_lang = gr.Dropdown(
-                            choices=["original", "english", "lao", "burmese", "khmer", "vietnamese"],
-                            label="เลือกภาษา",
-                            value="original",
-                            info="เลือกภาษาที่ต้องการดาวน์โหลด"
-                        )
-                        download_srt_btn = gr.Button("📥 ดาวน์โหลด SRT", variant="secondary")
-                    
-                    srt_file = gr.File(label="ไฟล์ SRT", interactive=False)
+                        
+                        translate_btn = gr.Button("🌍 แปลภาษา", variant="primary", size="lg")
+                        translate_status = gr.Markdown("")
+                        
+                        gr.Markdown("---")
+                        gr.Markdown("### 📥 ดาวน์โหลดไฟล์ SRT")
+                        
+                        with gr.Row():
+                            download_lang = gr.Dropdown(
+                                choices=["original", "english", "lao", "burmese", "khmer", "vietnamese"],
+                                label="เลือกภาษา",
+                                value="original",
+                                info="เลือกภาษาที่ต้องการดาวน์โหลด"
+                            )
+                            download_srt_btn = gr.Button("📥 ดาวน์โหลด SRT", variant="secondary")
+                        
+                        srt_file = gr.File(label="ไฟล์ SRT", interactive=False)
                 
                 # Tab 5: Embed Subtitles
-                with gr.Tab("5️⃣ ฝัง Subtitle"):
-                    gr.Markdown("""
-                    ### 🎞️ ฝัง Subtitle เข้ากับวิดีโอ
+                with gr.Tab("5️⃣ ฝัง Subtitle", id=4):
+                    # Warning message if step 4 not completed (optional - can embed original or translated)
+                    step5_warning = gr.Markdown("⚠️ **กรุณาแปลภาษาที่ Tab 4 ก่อน (หรือใช้ subtitle ต้นฉบับ)**", visible=True)
                     
-                    **ขั้นตอน:**
-                    1. เลือกภาษา subtitle ที่ต้องการฝัง
-                    2. เลือกประเภท: Hard (ฝังติดวิดีโอ) หรือ Soft (แยกไฟล์)
-                    3. ปรับแต่งฟอนต์ (สำหรับ Hard subtitle)
-                    4. กดปุ่ม "ฝัง Subtitle"
-                    5. รอให้ระบบประมวลผล
-                    6. ดาวน์โหลดวิดีโอที่ฝัง subtitle แล้ว
-                    """)
-                    
-                    with gr.Row():
-                        embed_language = gr.Dropdown(
+                    step5_content = gr.Column(visible=False)
+                    with step5_content:
+                        gr.Markdown("""
+                        ### 🎞️ ฝัง Subtitle เข้ากับวิดีโอ
+                        
+                        **ขั้นตอน:**
+                        1. เลือกภาษา subtitle ที่ต้องการฝัง
+                        2. เลือกประเภท: Hard (ฝังติดวิดีโอ) หรือ Soft (แยกไฟล์)
+                        3. ปรับแต่งฟอนต์ (สำหรับ Hard subtitle)
+                        4. กดปุ่ม "ฝัง Subtitle"
+                        5. รอให้ระบบประมวลผล
+                        6. ดาวน์โหลดวิดีโอที่ฝัง subtitle แล้ว
+                        """)
+                        
+                        with gr.Row():
+                            embed_language = gr.Dropdown(
                             choices=["original", "english", "lao", "burmese", "khmer", "vietnamese"],
                             label="🌐 เลือกภาษา Subtitle",
                             value="original",
@@ -961,15 +1032,15 @@ def create_ui():
                                 label="สีขอบ",
                                 info="เช่น: black, #000000"
                             )
-                    
-                    embed_btn = gr.Button("🎞️ ฝัง Subtitle เข้ากับวิดีโอ", variant="primary", size="lg")
-                    embed_status = gr.Markdown("")
-                    
-                    gr.Markdown("### 📹 วิดีโอที่ฝัง Subtitle แล้ว")
-                    output_video = gr.Video(label="", show_label=False)
-                    
-                    gr.Markdown("### 📥 ดาวน์โหลดวิดีโอ")
-                    download_video_file = gr.File(label="ไฟล์วิดีโอที่ฝัง Subtitle", interactive=False)
+                        
+                        embed_btn = gr.Button("🎞️ ฝัง Subtitle เข้ากับวิดีโอ", variant="primary", size="lg")
+                        embed_status = gr.Markdown("")
+                        
+                        gr.Markdown("### 📹 วิดีโอที่ฝัง Subtitle แล้ว")
+                        output_video = gr.Video(label="", show_label=False)
+                        
+                        gr.Markdown("### 📥 ดาวน์โหลดวิดีโอ")
+                        download_video_file = gr.File(label="ไฟล์วิดีโอที่ฝัง Subtitle", interactive=False)
         
         # Event Handlers
         def login_and_update_limits(username, password):
@@ -1002,10 +1073,22 @@ def create_ui():
             outputs=[login_section, main_section, login_status, quota_display, user_display]
         )
         
+        refresh_quota_btn.click(
+            refresh_quota,
+            outputs=[quota_display]
+        )
+        
+        def upload_and_unlock_step2(video_file):
+            """Upload video and unlock step 2"""
+            result = upload_video(video_file)
+            # result = (upload_status, transcribe_tab_content, video_preview, audio_preview, quota_display)
+            # Add: hide step2_warning
+            return result + (gr.update(visible=False),)
+        
         upload_btn.click(
-            upload_video,
+            upload_and_unlock_step2,
             inputs=[video_input],
-            outputs=[upload_status, transcribe_tab_content, video_preview, audio_preview, quota_display]
+            outputs=[upload_status, transcribe_tab_content, video_preview, audio_preview, quota_display, step2_warning]
         )
         
         def transcribe_and_prepare_edit(provider):
@@ -1055,9 +1138,10 @@ def create_ui():
                     return (
                         status,
                         text_display,
-                        gr.update(visible=True),
+                        gr.update(visible=True),  # edit_tab_content
                         video_file,
-                        subtitle_text
+                        subtitle_text,
+                        gr.update(visible=False)  # step3_warning - hide warning
                     )
                 else:
                     error_msg = response.json().get('detail', 'Unknown error')
@@ -1066,7 +1150,8 @@ def create_ui():
                         "",
                         gr.update(visible=False),
                         None,
-                        ""
+                        "",
+                        gr.update(visible=True)  # step3_warning - keep warning
                     )
                     
             except Exception as e:
@@ -1077,7 +1162,8 @@ def create_ui():
                     "",
                     gr.update(visible=False),
                     None,
-                    ""
+                    "",
+                    gr.update(visible=True)  # step3_warning - keep warning
                 )
         
         transcribe_btn.click(
@@ -1088,15 +1174,25 @@ def create_ui():
                 transcription_output, 
                 edit_tab_content,
                 edit_video,
-                subtitle_editor
+                subtitle_editor,
+                step3_warning
             ]
         )
         
         # Save edited subtitles
+        def save_and_unlock_step4(edited_text):
+            """Save subtitles and unlock step 4"""
+            status, text = save_edited_subtitles(edited_text)
+            # Check if save was successful
+            if "✅" in status:
+                return status, text, gr.update(visible=False), gr.update(visible=True)
+            else:
+                return status, text, gr.update(visible=True), gr.update(visible=False)
+        
         save_all_btn.click(
-            save_edited_subtitles,
+            save_and_unlock_step4,
             inputs=[subtitle_editor],
-            outputs=[edit_status, subtitle_editor]
+            outputs=[edit_status, subtitle_editor, step4_warning, step4_content]
         )
         
         # Refresh subtitle editor
@@ -1105,10 +1201,19 @@ def create_ui():
             outputs=[subtitle_editor, edit_status]
         )
         
+        def translate_and_unlock_step5(language, style, provider):
+            """Translate and unlock step 5"""
+            status, file = translate_subtitles(language, style, provider)
+            # Check if translation was successful
+            if "✅" in status:
+                return status, file, gr.update(visible=False), gr.update(visible=True)
+            else:
+                return status, file, gr.update(visible=True), gr.update(visible=False)
+        
         translate_btn.click(
-            translate_subtitles,
+            translate_and_unlock_step5,
             inputs=[language_select, style_input, provider_translate],
-            outputs=[translate_status, srt_file]
+            outputs=[translate_status, srt_file, step5_warning, step5_content]
         )
         
         download_srt_btn.click(

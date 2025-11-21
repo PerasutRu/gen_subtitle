@@ -245,6 +245,27 @@ async def admin_reload_limits(current_admin: dict = Depends(get_current_admin)):
         "limits": session_manager.get_limits()
     }
 
+@app.get("/user/session")
+async def get_user_session(current_user: dict = Depends(get_current_user)):
+    """ดึง session ของ user ปัจจุบัน"""
+    # Use username as session_id for persistence
+    username = current_user["username"]
+    session_id = f"user_{username}"
+    
+    # Get or create session
+    session_manager.get_or_create_session(session_id)
+    
+    # Get usage
+    usage = session_manager.get_session_usage(session_id)
+    limits = session_manager.get_limits()
+    
+    return {
+        "session_id": session_id,
+        "username": username,
+        "usage": usage,
+        "limits": limits
+    }
+
 @app.post("/upload-video")
 async def upload_video(
     file: UploadFile = File(...),
@@ -253,11 +274,13 @@ async def upload_video(
 ):
     """อัปโหลดไฟล์วิดีโอและแปลงเป็น MP3 พร้อมตรวจสอบ quota"""
     try:
-        # Get or create session
+        # Use username-based session for persistence
+        username = current_user["username"]
         if not session_id:
-            session_id = session_manager.get_or_create_session()
-        else:
-            session_manager.get_or_create_session(session_id)
+            session_id = f"user_{username}"
+        
+        # Get or create session
+        session_manager.get_or_create_session(session_id)
         
         # Validate file type
         limits = session_manager.get_limits()
