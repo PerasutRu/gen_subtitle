@@ -561,7 +561,7 @@ class Database:
         status: str = "success",
         error_message: Optional[str] = None
     ) -> bool:
-        """บันทึก activity log"""
+        """บันทึก activity log (with duplicate prevention)"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -575,6 +575,30 @@ class Database:
             # Convert details to JSON
             details_json = json.dumps(details) if details else None
             
+            # Check for duplicate within last 5 seconds (prevent React StrictMode duplicates)
+            # Calculate 5 seconds ago in ISO format
+            from datetime import timedelta
+            five_seconds_ago = (datetime.now() - timedelta(seconds=5)).isoformat()
+            
+            cursor.execute("""
+                SELECT id FROM activity_logs 
+                WHERE session_id = ? 
+                AND activity_type = ? 
+                AND file_id = ?
+                AND status = ?
+                AND created_at > ?
+                LIMIT 1
+            """, (session_id, activity_type, file_id, status, five_seconds_ago))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Duplicate detected, skip logging
+                print(f"⚠️ Duplicate activity log prevented: {activity_type} for {file_id}")
+                conn.close()
+                return True
+            
+            # Insert new log
             cursor.execute("""
                 INSERT INTO activity_logs 
                 (session_id, username, activity_type, file_id, details, status, error_message, created_at)

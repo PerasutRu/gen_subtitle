@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Download, Edit3, AlertCircle } from 'lucide-react'
 import axios from 'axios'
 
@@ -7,9 +7,14 @@ const TranscriptionEditor = ({ fileData, onTranscriptionComplete }) => {
   const [transcription, setTranscription] = useState(null)
   const [error, setError] = useState(null)
   const provider = 'botnoi' // Default to Botnoi
+  const hasStarted = useRef(false) // Prevent double call in StrictMode
 
   useEffect(() => {
-    startTranscription()
+    // Only run once, even in StrictMode
+    if (!hasStarted.current) {
+      hasStarted.current = true
+      startTranscription()
+    }
   }, [])
 
   const startTranscription = async () => {
