@@ -258,6 +258,60 @@ async def admin_reload_limits(current_admin: dict = Depends(get_current_admin)):
         "limits": session_manager.get_limits()
     }
 
+@app.get("/admin/default-limits")
+async def admin_get_default_limits(current_admin: dict = Depends(get_current_admin)):
+    """[Admin] ดู default limits จาก config file"""
+    return {
+        "limits": session_manager.get_limits()
+    }
+
+@app.put("/admin/default-limits")
+async def admin_update_default_limits(
+    limits: dict,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """[Admin] อัปเดต default limits ใน config file"""
+    try:
+        # Validate limits
+        required_fields = ["maxVideos", "maxDurationMinutes", "maxFileSizeMB"]
+        for field in required_fields:
+            if field not in limits:
+                raise HTTPException(status_code=400, detail=f"Missing field: {field}")
+            if not isinstance(limits[field], (int, float)) or limits[field] <= 0:
+                raise HTTPException(status_code=400, detail=f"Invalid value for {field}")
+        
+        # Update config file
+        import json
+        config_path = session_manager.config_path
+        
+        # Read current config
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        # Update limits
+        config["maxVideos"] = limits["maxVideos"]
+        config["maxDurationMinutes"] = limits["maxDurationMinutes"]
+        config["maxFileSizeMB"] = limits["maxFileSizeMB"]
+        
+        # Write back to file
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        
+        # Reload limits
+        session_manager.reload_limits()
+        
+        return {
+            "message": "อัปเดต default limits สำเร็จ",
+            "limits": session_manager.get_limits()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating default limits: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
+
 @app.get("/admin/user/{username}/limits")
 async def admin_get_user_limits(
     username: str,

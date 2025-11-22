@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { getStats, reloadLimits } from '../../services/adminApi';
-import { BarChart3, RefreshCw, Settings } from 'lucide-react';
+import { BarChart3, RefreshCw, Settings, Edit } from 'lucide-react';
+import DefaultLimitsModal from './DefaultLimitsModal';
 
 const SystemStats = () => {
   const [stats, setStats] = useState(null);
   const [limits, setLimits] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
+  const [showLimitsModal, setShowLimitsModal] = useState(false);
 
   const loadStats = async () => {
     try {
@@ -67,15 +69,24 @@ const SystemStats = () => {
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center">
             <Settings className="mr-2 h-5 w-5" />
-            ค่า Limits ของระบบ
+            ค่า Limits ของระบบ (Default)
           </h3>
-          <button
-            onClick={handleReloadLimits}
-            disabled={reloading}
-            className="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
-          >
-            {reloading ? 'กำลังโหลด...' : 'โหลดใหม่'}
-          </button>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setShowLimitsModal(true)}
+              className="flex items-center space-x-1 px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              <Edit className="h-4 w-4" />
+              <span>แก้ไข</span>
+            </button>
+            <button
+              onClick={handleReloadLimits}
+              disabled={reloading}
+              className="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
+            >
+              {reloading ? 'กำลังโหลด...' : 'โหลดใหม่'}
+            </button>
+          </div>
         </div>
         {limits && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -123,6 +134,15 @@ const SystemStats = () => {
           </div>
         </div>
       )}
+
+      {/* Default Limits Modal */}
+      <DefaultLimitsModal
+        isOpen={showLimitsModal}
+        onClose={() => setShowLimitsModal(false)}
+        onSuccess={() => {
+          loadStats();
+        }}
+      />
     </div>
   );
 };

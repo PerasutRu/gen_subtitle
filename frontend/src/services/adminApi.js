@@ -60,3 +60,14 @@ export const deleteUserLimits = async (username) => {
   const response = await axios.delete(`${API_URL}/admin/user/${username}/limits`);
   return response.data;
 };
+
+// Default Limits Management
+export const getDefaultLimits = async () => {
+  const response = await axios.get(`${API_URL}/admin/default-limits`);
+  return response.data;
+};
+
+export const updateDefaultLimits = async (limits) => {
+  const response = await axios.put(`${API_URL}/admin/default-limits`, limits);
+  return response.data;
+};
