@@ -23,12 +23,28 @@ const SessionManagement = () => {
     if (!confirm(`ต้องการลบ session "${sessionId}"?`)) return;
     
     try {
-      await deleteSession(sessionId);
-      alert('ลบ session สำเร็จ');
-      loadSessions();
+      const result = await deleteSession(sessionId);
+      console.log('✅ Delete session result:', result);
+      
+      // Reload sessions first
+      await loadSessions();
+      
+      // Show success message
+      alert(result.message || 'ลบ session สำเร็จ');
     } catch (error) {
-      console.error('Error deleting session:', error);
-      alert('ไม่สามารถลบ session ได้');
+      console.error('❌ Error deleting session:', error);
+      console.error('   Error response:', error.response);
+      
+      // Check if it's actually successful (status 200)
+      if (error.response?.status === 200 || error.response?.data?.success) {
+        console.log('   Actually successful, reloading...');
+        await loadSessions();
+        alert('ลบ session สำเร็จ');
+      } else {
+        // Real error
+        const errorMsg = error.response?.data?.detail || 'ไม่สามารถลบ session ได้';
+        alert(errorMsg);
+      }
     }
   };
 
@@ -36,12 +52,27 @@ const SessionManagement = () => {
     if (!confirm('⚠️ ต้องการลบ session ทั้งหมด? การกระทำนี้ไม่สามารถย้อนกลับได้!')) return;
     
     try {
-      await resetAllSessions();
-      alert('Reset สำเร็จ ลบ session ทั้งหมดแล้ว');
-      loadSessions();
+      const result = await resetAllSessions();
+      console.log('✅ Reset all result:', result);
+      
+      // Reload sessions first
+      await loadSessions();
+      
+      // Show success message
+      alert(result.message || 'Reset สำเร็จ ลบ session ทั้งหมดแล้ว');
     } catch (error) {
-      console.error('Error resetting sessions:', error);
-      alert('ไม่สามารถ reset sessions ได้');
+      console.error('❌ Error resetting sessions:', error);
+      console.error('   Error response:', error.response);
+      
+      // Check if it's actually successful
+      if (error.response?.status === 200 || error.response?.data?.success) {
+        console.log('   Actually successful, reloading...');
+        await loadSessions();
+        alert('Reset สำเร็จ ลบ session ทั้งหมดแล้ว');
+      } else {
+        const errorMsg = error.response?.data?.detail || 'ไม่สามารถ reset sessions ได้';
+        alert(errorMsg);
+      }
     }
   };
 

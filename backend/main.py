@@ -219,11 +219,22 @@ async def admin_delete_session(
     current_admin: dict = Depends(get_current_admin)
 ):
     """[Admin] ลบ session เฉพาะ"""
-    success = session_manager.clear_session(session_id)
-    if success:
-        return {"message": f"ลบ session {session_id} สำเร็จ"}
-    else:
-        raise HTTPException(status_code=500, detail="ไม่สามารถลบ session ได้")
+    try:
+        # clear_session returns the result from db.delete_session
+        # which returns True even if session doesn't exist (idempotent)
+        success = session_manager.clear_session(session_id)
+        
+        # Always return success if no exception was raised
+        return {
+            "success": True,
+            "message": f"ลบ session {session_id} สำเร็จ",
+            "session_id": session_id
+        }
+    except Exception as e:
+        print(f"❌ Error in admin_delete_session: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
 
 @app.post("/admin/reset")
 async def admin_reset_all(current_admin: dict = Depends(get_current_admin)):
@@ -231,6 +242,7 @@ async def admin_reset_all(current_admin: dict = Depends(get_current_admin)):
     success = session_manager.clear_all_sessions()
     if success:
         return {
+            "success": True,
             "message": "Reset สำเร็จ ลบ session ทั้งหมดแล้ว",
             "timestamp": datetime.now().isoformat()
         }

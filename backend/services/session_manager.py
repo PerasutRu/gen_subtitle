@@ -122,9 +122,9 @@ class SessionManager:
         """ดึงค่า limits ปัจจุบัน"""
         return self.limits.copy()
     
-    def clear_session(self, session_id: str):
+    def clear_session(self, session_id: str) -> bool:
         """ลบ session (สำหรับ testing หรือ reset)"""
-        self.db.delete_session(session_id)
+        return self.db.delete_session(session_id)
     
     def get_all_sessions(self):
         """ดึงรายการ session ทั้งหมด (สำหรับ admin)"""

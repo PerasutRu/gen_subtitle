@@ -226,15 +226,23 @@ class Database:
             
             # ลบวิดีโอ
             cursor.execute("DELETE FROM videos WHERE session_id = ?", (session_id,))
+            videos_deleted = cursor.rowcount
             
             # ลบ session
             cursor.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            sessions_deleted = cursor.rowcount
             
             conn.commit()
             conn.close()
+            
+            # Return True แม้ว่าไม่มี session (idempotent)
+            # ถ้าไม่มี session ก็ถือว่าลบสำเร็จแล้ว
+            print(f"✅ Deleted session {session_id}: {sessions_deleted} sessions, {videos_deleted} videos")
             return True
         except Exception as e:
-            print(f"Error deleting session: {e}")
+            print(f"❌ Error deleting session {session_id}: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def get_all_sessions(self) -> List[Dict]:
@@ -264,7 +272,7 @@ class Database:
                     "session_id": row[0],
                     "created_at": row[1],
                     "last_activity": row[2],
-                    "video_count": row[3],
+                    "videos_count": row[3],  # Changed to match other endpoints
                     "total_duration": row[4]
                 }
                 for row in rows
