@@ -1,3 +1,6 @@
+// ตัวอย่างการแก้ไข App.jsx เพื่อรองรับ Admin Dashboard
+// คัดลอกโค้ดนี้ไปแทนที่ใน App.jsx
+
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import Login from './components/Login'
@@ -26,17 +29,17 @@ function App() {
 
   const handleVideoUploaded = (data) => {
     setFileData(data)
-    setCurrentStep(2) // ไป step 2 (แกะเสียง)
+    setCurrentStep(2)
   }
 
   const handleTranscriptionComplete = (data) => {
     setTranscriptionData(data)
-    setCurrentStep(3) // ไป step 3 (แก้ไข subtitle)
+    setCurrentStep(3)
   }
 
   const handleEditComplete = (data) => {
     setEditedTranscriptionData(data)
-    setCurrentStep(4) // ไป step 4 (แปลภาษา)
+    setCurrentStep(4)
   }
 
   // Check authentication on mount
@@ -45,7 +48,6 @@ function App() {
     const storedUser = localStorage.getItem('user')
 
     if (token && storedUser) {
-      // Set axios default header
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
       setUser(JSON.parse(storedUser))
     }
@@ -80,7 +82,7 @@ function App() {
     return <Login onLoginSuccess={handleLoginSuccess} />
   }
 
-  // ✨ Admin Dashboard: ถ้าเป็น admin ให้แสดง Admin Dashboard
+  // ✨ เพิ่มส่วนนี้: ถ้าเป็น admin ให้แสดง Admin Dashboard
   if (user.role === 'admin') {
     return <AdminDashboard user={user} onLogout={handleLogout} />
   }
