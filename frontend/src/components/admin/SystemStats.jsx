@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { getStats, reloadLimits } from '../../services/adminApi';
-import { BarChart3, RefreshCw, Settings, Edit } from 'lucide-react';
+import { getStats, reloadLimits, getActivityStats } from '../../services/adminApi';
+import { BarChart3, RefreshCw, Settings, Edit, Activity, TrendingUp } from 'lucide-react';
 import DefaultLimitsModal from './DefaultLimitsModal';
 
 const SystemStats = () => {
   const [stats, setStats] = useState(null);
   const [limits, setLimits] = useState(null);
+  const [activityStats, setActivityStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
   const [showLimitsModal, setShowLimitsModal] = useState(false);
@@ -13,9 +14,13 @@ const SystemStats = () => {
   const loadStats = async () => {
     try {
       setLoading(true);
-      const data = await getStats();
-      setStats(data.stats);
-      setLimits(data.limits);
+      const [statsData, activityData] = await Promise.all([
+        getStats(),
+        getActivityStats()
+      ]);
+      setStats(statsData.stats);
+      setLimits(statsData.limits);
+      setActivityStats(activityData);
     } catch (error) {
       console.error('Error loading stats:', error);
       alert('ไม่สามารถโหลดสถิติได้');
@@ -128,8 +133,84 @@ const SystemStats = () => {
             <div className="bg-yellow-50 p-4 rounded">
               <p className="text-sm text-gray-600">ความยาวรวม (นาที)</p>
               <p className="text-2xl font-bold text-yellow-600">
-                {stats.total_duration ? (stats.total_duration / 60).toFixed(1) : 0}
+                {stats.total_duration_minutes || 0}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Activity Stats */}
+      {activityStats && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Activity className="mr-2 h-5 w-5" />
+            Activity Statistics
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Activities by Type */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Activities by Type</h4>
+              <div className="space-y-2">
+                {Object.entries(activityStats.by_type || {}).map(([type, count]) => (
+                  <div key={type} className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600 capitalize">{type.replace('_', ' ')}</span>
+                    <span className="text-sm font-semibold text-gray-900">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Provider Usage */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Provider Usage</h4>
+              <div className="space-y-2">
+                {Object.entries(activityStats.provider_usage || {}).map(([provider, count]) => (
+                  <div key={provider} className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600 capitalize">{provider}</span>
+                    <span className="text-sm font-semibold text-gray-900">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Success Rate */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Success Rate</h4>
+              <div className="space-y-2">
+                {Object.entries(activityStats.by_status || {}).map(([status, count]) => (
+                  <div key={status} className="flex justify-between items-center">
+                    <span className={`text-sm capitalize ${status === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                      {status}
+                    </span>
+                    <span className="text-sm font-semibold text-gray-900">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Language Usage */}
+            {activityStats.language_usage && Object.keys(activityStats.language_usage).length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-3">Translation Languages</h4>
+                <div className="space-y-2">
+                  {Object.entries(activityStats.language_usage).slice(0, 5).map(([lang, count]) => (
+                    <div key={lang} className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600 uppercase">{lang}</span>
+                      <span className="text-sm font-semibold text-gray-900">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Total Activities */}
+          <div className="mt-6 pt-6 border-t">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-700">Total Activities</span>
+              <span className="text-2xl font-bold text-blue-600">{activityStats.total_activities || 0}</span>
             </div>
           </div>
         </div>

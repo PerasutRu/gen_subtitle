@@ -58,6 +58,22 @@ class Database:
             )
         """)
         
+        # ตาราง activity_logs
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                username TEXT,
+                activity_type TEXT NOT NULL,
+                file_id TEXT,
+                details TEXT,
+                status TEXT NOT NULL DEFAULT 'success',
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions (session_id)
+            )
+        """)
+        
         # สร้าง index
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_session_id 
@@ -67,6 +83,21 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_username 
             ON users (username)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_activity_session 
+            ON activity_logs (session_id)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_activity_type 
+            ON activity_logs (activity_type)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_activity_created 
+            ON activity_logs (created_at)
         """)
         
         conn.commit()
@@ -518,6 +549,213 @@ class Database:
         except Exception as e:
             print(f"Error deleting user limits: {e}")
             return False
+    
+    # ==================== Activity Logging ====================
+    
+    def log_activity(
+        self,
+        session_id: str,
+        activity_type: str,
+        file_id: Optional[str] = None,
+        details: Optional[Dict] = None,
+        status: str = "success",
+        error_message: Optional[str] = None
+    ) -> bool:
+        """บันทึก activity log"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            
+            # Extract username from session_id if possible
+            username = None
+            if session_id.startswith("user_"):
+                username = session_id.replace("user_", "")
+            
+            # Convert details to JSON
+            details_json = json.dumps(details) if details else None
+            
+            cursor.execute("""
+                INSERT INTO activity_logs 
+                (session_id, username, activity_type, file_id, details, status, error_message, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, username, activity_type, file_id, details_json, status, error_message, now))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error logging activity: {e}")
+            return False
+    
+    def get_activities(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        activity_type: Optional[str] = None,
+        session_id: Optional[str] = None,
+        username: Optional[str] = None,
+        status: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
+    ) -> Dict:
+        """ดึง activity logs พร้อม filters"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Build query with filters
+            where_clauses = []
+            params = []
+            
+            if activity_type:
+                where_clauses.append("activity_type = ?")
+                params.append(activity_type)
+            
+            if session_id:
+                where_clauses.append("session_id = ?")
+                params.append(session_id)
+            
+            if username:
+                where_clauses.append("username = ?")
+                params.append(username)
+            
+            if status:
+                where_clauses.append("status = ?")
+                params.append(status)
+            
+            if date_from:
+                where_clauses.append("created_at >= ?")
+                params.append(date_from)
+            
+            if date_to:
+                where_clauses.append("created_at <= ?")
+                params.append(date_to)
+            
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+            
+            # Get total count
+            cursor.execute(f"SELECT COUNT(*) FROM activity_logs WHERE {where_sql}", params)
+            total = cursor.fetchone()[0]
+            
+            # Get activities with pagination
+            query = f"""
+                SELECT id, session_id, username, activity_type, file_id, 
+                       details, status, error_message, created_at
+                FROM activity_logs
+                WHERE {where_sql}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """
+            cursor.execute(query, params + [limit, offset])
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            activities = []
+            for row in rows:
+                activity = {
+                    "id": row[0],
+                    "session_id": row[1],
+                    "username": row[2],
+                    "activity_type": row[3],
+                    "file_id": row[4],
+                    "status": row[6],
+                    "error_message": row[7],
+                    "created_at": row[8]
+                }
+                
+                # Parse details JSON
+                if row[5]:
+                    try:
+                        activity["details"] = json.loads(row[5])
+                    except:
+                        activity["details"] = {}
+                else:
+                    activity["details"] = {}
+                
+                activities.append(activity)
+            
+            return {
+                "total": total,
+                "activities": activities,
+                "limit": limit,
+                "offset": offset
+            }
+        except Exception as e:
+            print(f"Error getting activities: {e}")
+            return {"total": 0, "activities": [], "limit": limit, "offset": offset}
+    
+    def get_activity_stats(self) -> Dict:
+        """ดึงสถิติ activities"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Total activities
+            cursor.execute("SELECT COUNT(*) FROM activity_logs")
+            total_activities = cursor.fetchone()[0]
+            
+            # Activities by type
+            cursor.execute("""
+                SELECT activity_type, COUNT(*) as count
+                FROM activity_logs
+                GROUP BY activity_type
+            """)
+            by_type = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # Success rate
+            cursor.execute("""
+                SELECT status, COUNT(*) as count
+                FROM activity_logs
+                GROUP BY status
+            """)
+            by_status = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # Provider usage (from details JSON)
+            cursor.execute("""
+                SELECT details FROM activity_logs 
+                WHERE activity_type IN ('transcribe', 'translate')
+                AND details IS NOT NULL
+            """)
+            provider_counts = {"openai": 0, "botnoi": 0}
+            language_counts = {}
+            
+            for row in cursor.fetchall():
+                try:
+                    details = json.loads(row[0])
+                    if "provider" in details:
+                        provider = details["provider"]
+                        provider_counts[provider] = provider_counts.get(provider, 0) + 1
+                    if "target_language" in details:
+                        lang = details["target_language"]
+                        language_counts[lang] = language_counts.get(lang, 0) + 1
+                except:
+                    pass
+            
+            # Recent activities (last 7 days)
+            cursor.execute("""
+                SELECT DATE(created_at) as date, COUNT(*) as count
+                FROM activity_logs
+                WHERE created_at >= datetime('now', '-7 days')
+                GROUP BY DATE(created_at)
+                ORDER BY date DESC
+            """)
+            recent_by_date = [{"date": row[0], "count": row[1]} for row in cursor.fetchall()]
+            
+            conn.close()
+            
+            return {
+                "total_activities": total_activities,
+                "by_type": by_type,
+                "by_status": by_status,
+                "provider_usage": provider_counts,
+                "language_usage": language_counts,
+                "recent_by_date": recent_by_date
+            }
+        except Exception as e:
+            print(f"Error getting activity stats: {e}")
+            return {}
 
 # Global instance
 db = Database()

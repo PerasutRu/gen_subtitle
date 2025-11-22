@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Users, Database, BarChart3, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Database, BarChart3, Activity, LogOut } from 'lucide-react';
 import UserManagement from './UserManagement';
 import SessionManagement from './SessionManagement';
 import SystemStats from './SystemStats';
+import ActivityLogs from './ActivityLogs';
 
 const AdminDashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('stats');
 
   const tabs = [
     { id: 'stats', label: 'สถิติระบบ', icon: BarChart3 },
+    { id: 'activities', label: 'Activity Logs', icon: Activity },
     { id: 'users', label: 'จัดการ Users', icon: Users },
     { id: 'sessions', label: 'จัดการ Sessions', icon: Database },
   ];
@@ -70,6 +72,7 @@ const AdminDashboard = ({ user, onLogout }) => {
         {/* Content */}
         <div className="bg-white rounded-lg shadow-lg p-6">
           {activeTab === 'stats' && <SystemStats />}
+          {activeTab === 'activities' && <ActivityLogs />}
           {activeTab === 'users' && <UserManagement />}
           {activeTab === 'sessions' && <SessionManagement />}
         </div>

@@ -381,6 +381,37 @@ async def admin_delete_user_limits(
         "username": username
     }
 
+@app.get("/admin/activities")
+async def admin_get_activities(
+    limit: int = 50,
+    offset: int = 0,
+    activity_type: Optional[str] = None,
+    session_id: Optional[str] = None,
+    username: Optional[str] = None,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """[Admin] ดึง activity logs พร้อม filters"""
+    result = db.get_activities(
+        limit=limit,
+        offset=offset,
+        activity_type=activity_type,
+        session_id=session_id,
+        username=username,
+        status=status,
+        date_from=date_from,
+        date_to=date_to
+    )
+    return result
+
+@app.get("/admin/activities/stats")
+async def admin_get_activity_stats(current_admin: dict = Depends(get_current_admin)):
+    """[Admin] ดึงสถิติ activities"""
+    stats = db.get_activity_stats()
+    return stats
+
 @app.get("/user/session")
 async def get_user_session(current_user: dict = Depends(get_current_user)):
     """ดึง session ของ user ปัจจุบัน"""
@@ -474,6 +505,19 @@ async def upload_video(
         # Convert to MP3
         mp3_path = await video_processor.convert_to_mp3(video_path, file_id)
         
+        # Log activity
+        db.log_activity(
+            session_id=session_id,
+            activity_type="upload",
+            file_id=file_id,
+            details={
+                "file_size_mb": round(file_size_mb, 2),
+                "duration_seconds": duration_seconds,
+                "original_filename": file.filename
+            },
+            status="success"
+        )
+        
         # Get updated usage
         usage = session_manager.get_session_usage(session_id)
         
@@ -514,18 +558,29 @@ async def download_mp3(file_id: str):
     )
 
 @app.post("/transcribe/{file_id}")
-async def transcribe_audio(file_id: str, provider: str = Form("openai")):
+async def transcribe_audio(
+    file_id: str, 
+    provider: str = Form("openai"),
+    session_id: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
     """แกะเสียงจากไฟล์ MP3 เป็นข้อความพร้อม timestamp
     
     Args:
         file_id: ID ของไฟล์
         provider: ผู้ให้บริการ ('openai' หรือ 'botnoi')
+        session_id: Session ID (optional)
     """
     try:
         mp3_path = UPLOAD_DIR / f"{file_id}.mp3"
         
         if not mp3_path.exists():
             raise HTTPException(status_code=404, detail="ไม่พบไฟล์ MP3")
+        
+        # Get session_id
+        if not session_id:
+            username = current_user["username"]
+            session_id = f"user_{username}"
         
         print(f"Starting transcription for file: {mp3_path} with provider: {provider}")
         
@@ -544,6 +599,30 @@ async def transcribe_audio(file_id: str, provider: str = Form("openai")):
         srt_path = UPLOAD_DIR / f"{file_id}_original.srt"
         await transcription_service.save_srt(result, srt_path)
         
+        # Log activity
+        # Get segments count safely
+        segments_count = 0
+        if isinstance(result, list):
+            segments_count = len(result)
+        elif hasattr(result, 'segments'):
+            segments_count = len(result.segments)
+        elif hasattr(result, '__len__'):
+            try:
+                segments_count = len(result)
+            except:
+                segments_count = 0
+        
+        db.log_activity(
+            session_id=session_id,
+            activity_type="transcribe",
+            file_id=file_id,
+            details={
+                "provider": provider,
+                "segments_count": segments_count
+            },
+            status="success"
+        )
+        
         return {
             "file_id": file_id,
             "provider": provider,
@@ -556,6 +635,16 @@ async def transcribe_audio(file_id: str, provider: str = Form("openai")):
         raise
     except Exception as e:
         print(f"Transcription API error: {str(e)}")
+        # Log failed activity
+        if session_id:
+            db.log_activity(
+                session_id=session_id,
+                activity_type="transcribe",
+                file_id=file_id,
+                details={"provider": provider},
+                status="failed",
+                error_message=str(e)
+            )
         raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
 
 @app.post("/translate")
@@ -563,7 +652,9 @@ async def translate_subtitles(
     file_id: str = Form(...),
     target_language: str = Form(...),
     style_prompt: Optional[str] = Form(None),
-    provider: str = Form("openai")
+    provider: str = Form("openai"),
+    session_id: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
 ):
     """แปลซับไตเติ้ลเป็นภาษาต่างๆ
     
@@ -572,8 +663,13 @@ async def translate_subtitles(
         target_language: ภาษาเป้าหมาย
         style_prompt: คำแนะนำสไตล์การแปล (optional)
         provider: ผู้ให้บริการ ('openai' หรือ 'botnoi')
+        session_id: Session ID (optional)
     """
     try:
+        # Get session_id
+        if not session_id:
+            username = current_user["username"]
+            session_id = f"user_{username}"
         srt_path = UPLOAD_DIR / f"{file_id}_original.srt"
         
         if not srt_path.exists():
@@ -603,6 +699,20 @@ async def translate_subtitles(
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(translated_srt)
             
+            # Log activity for OpenAI
+            db.log_activity(
+                session_id=session_id,
+                activity_type="translate",
+                file_id=file_id,
+                details={
+                    "provider": provider,
+                    "target_language": target_language,
+                    "style_prompt": style_prompt,
+                    "segments_count": len(segments)
+                },
+                status="success"
+            )
+            
             return {
                 "file_id": file_id,
                 "target_language": target_language,
@@ -619,6 +729,20 @@ async def translate_subtitles(
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(translated_srt)
         
+        # Log activity
+        db.log_activity(
+            session_id=session_id,
+            activity_type="translate",
+            file_id=file_id,
+            details={
+                "provider": provider,
+                "target_language": target_language,
+                "style_prompt": style_prompt,
+                "segments_count": len(segments)
+            },
+            status="success"
+        )
+        
         return {
             "file_id": file_id,
             "target_language": target_language,
@@ -627,7 +751,22 @@ async def translate_subtitles(
             "message": f"แปลเป็น {target_language} สำเร็จด้วย {provider}"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
+        # Log failed activity
+        if session_id:
+            db.log_activity(
+                session_id=session_id,
+                activity_type="translate",
+                file_id=file_id,
+                details={
+                    "provider": provider,
+                    "target_language": target_language
+                },
+                status="failed",
+                error_message=str(e)
+            )
         raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
 
 @app.get("/download-srt/{file_id}/{language}")
@@ -648,12 +787,17 @@ async def download_srt(file_id: str, language: str = "original"):
     )
 
 @app.post("/embed-subtitles")
-async def embed_subtitles(request: dict):
+async def embed_subtitles(request: dict, current_user: dict = Depends(get_current_user)):
     """ฝัง subtitle เข้ากับวิดีโอ (hard subtitle) พร้อมตัวเลือกการปรับแต่งฟอนต์"""
+    session_id = None
     try:
         file_id = request.get("file_id")
         language = request.get("language", "original")
         subtitle_type = request.get("type", "hard")  # "hard" or "soft"
+        
+        # Get session_id
+        username = current_user["username"]
+        session_id = f"user_{username}"
         
         # Speed preset option for hard subtitle
         speed_preset = request.get("speed_preset", "balanced")  # fast, balanced, quality
@@ -707,6 +851,33 @@ async def embed_subtitles(request: dict):
                 outline_color=outline_color
             )
         
+        # Log activity
+        details = {
+            "subtitle_type": subtitle_type,
+            "language": language
+        }
+        if subtitle_type == "hard":
+            details.update({
+                "speed_preset": speed_preset,
+                "font_settings": {
+                    "font_name": font_name,
+                    "font_size": font_size,
+                    "bold": bold,
+                    "outline": outline,
+                    "shadow": shadow,
+                    "font_color": font_color,
+                    "outline_color": outline_color
+                }
+            })
+        
+        db.log_activity(
+            session_id=session_id,
+            activity_type="embed_subtitle",
+            file_id=file_id,
+            details=details,
+            status="success"
+        )
+        
         return {
             "file_id": file_id,
             "language": language,
@@ -730,6 +901,16 @@ async def embed_subtitles(request: dict):
         raise
     except Exception as e:
         print(f"Embed subtitles error: {str(e)}")
+        # Log failed activity
+        if session_id and file_id:
+            db.log_activity(
+                session_id=session_id,
+                activity_type="embed_subtitle",
+                file_id=file_id,
+                details={"subtitle_type": subtitle_type, "language": language},
+                status="failed",
+                error_message=str(e)
+            )
         raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
 
 @app.get("/download-video/{file_id}/{language}/{subtitle_type}")
