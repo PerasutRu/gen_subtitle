@@ -29,7 +29,8 @@ class Database:
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user',
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                custom_limits TEXT
             )
         """)
         
@@ -355,7 +356,7 @@ class Database:
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT id, username, password_hash, role, created_at
+                SELECT id, username, password_hash, role, created_at, custom_limits
                 FROM users
                 WHERE username = ?
             """, (username,))
@@ -364,13 +365,24 @@ class Database:
             conn.close()
             
             if row:
-                return {
+                user_data = {
                     "id": row[0],
                     "username": row[1],
                     "password_hash": row[2],
                     "role": row[3],
                     "created_at": row[4]
                 }
+                
+                # Parse custom_limits JSON if exists
+                if row[5]:
+                    try:
+                        user_data["custom_limits"] = json.loads(row[5])
+                    except:
+                        user_data["custom_limits"] = None
+                else:
+                    user_data["custom_limits"] = None
+                
+                return user_data
             return None
         except Exception as e:
             print(f"Error getting user: {e}")
@@ -383,7 +395,7 @@ class Database:
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT id, username, role, created_at
+                SELECT id, username, role, created_at, custom_limits
                 FROM users
                 ORDER BY created_at DESC
             """)
@@ -391,15 +403,27 @@ class Database:
             rows = cursor.fetchall()
             conn.close()
             
-            return [
-                {
+            users = []
+            for row in rows:
+                user_data = {
                     "id": row[0],
                     "username": row[1],
                     "role": row[2],
                     "created_at": row[3]
                 }
-                for row in rows
-            ]
+                
+                # Parse custom_limits JSON if exists
+                if row[4]:
+                    try:
+                        user_data["custom_limits"] = json.loads(row[4])
+                    except:
+                        user_data["custom_limits"] = None
+                else:
+                    user_data["custom_limits"] = None
+                
+                users.append(user_data)
+            
+            return users
         except Exception as e:
             print(f"Error getting users: {e}")
             return []
@@ -436,6 +460,55 @@ class Database:
             return True
         except Exception as e:
             print(f"Error updating user role: {e}")
+            return False
+    
+    # ==================== Custom Limits Management ====================
+    
+    def get_user_limits(self, username: str) -> Optional[Dict]:
+        """ดึง custom limits ของ user"""
+        user = self.get_user(username)
+        if user:
+            return user.get("custom_limits")
+        return None
+    
+    def set_user_limits(self, username: str, limits: Dict) -> bool:
+        """ตั้งค่า custom limits ให้ user"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            limits_json = json.dumps(limits)
+            
+            cursor.execute("""
+                UPDATE users
+                SET custom_limits = ?
+                WHERE username = ?
+            """, (limits_json, username))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error setting user limits: {e}")
+            return False
+    
+    def delete_user_limits(self, username: str) -> bool:
+        """ลบ custom limits ของ user (ใช้ default)"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE users
+                SET custom_limits = NULL
+                WHERE username = ?
+            """, (username,))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error deleting user limits: {e}")
             return False
 
 # Global instance

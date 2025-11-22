@@ -140,7 +140,8 @@ async def get_limits(current_user: dict = Depends(get_current_user)):
 async def get_session_usage(session_id: str, current_user: dict = Depends(get_current_user)):
     """ดึงข้อมูลการใช้งานของ session"""
     usage = session_manager.get_session_usage(session_id)
-    limits = session_manager.get_limits()
+    # Get limits for this specific session (custom or default)
+    limits = session_manager.get_limits_for_session(session_id)
     return {
         "usage": usage,
         "limits": limits
@@ -245,6 +246,75 @@ async def admin_reload_limits(current_admin: dict = Depends(get_current_admin)):
         "limits": session_manager.get_limits()
     }
 
+@app.get("/admin/user/{username}/limits")
+async def admin_get_user_limits(
+    username: str,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """[Admin] ดู custom limits ของ user"""
+    user = db.get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    custom_limits = user.get("custom_limits")
+    default_limits = session_manager.get_limits()
+    
+    return {
+        "username": username,
+        "custom_limits": custom_limits,
+        "default_limits": default_limits,
+        "active_limits": custom_limits if custom_limits else default_limits
+    }
+
+@app.put("/admin/user/{username}/limits")
+async def admin_set_user_limits(
+    username: str,
+    limits: dict,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """[Admin] ตั้งค่า custom limits ให้ user"""
+    user = db.get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Validate limits
+    required_fields = ["maxVideos", "maxDurationMinutes", "maxFileSizeMB"]
+    for field in required_fields:
+        if field not in limits:
+            raise HTTPException(status_code=400, detail=f"Missing field: {field}")
+        if not isinstance(limits[field], (int, float)) or limits[field] <= 0:
+            raise HTTPException(status_code=400, detail=f"Invalid value for {field}")
+    
+    # Set custom limits
+    success = db.set_user_limits(username, limits)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to set user limits")
+    
+    return {
+        "message": f"ตั้งค่า limits สำหรับ {username} สำเร็จ",
+        "username": username,
+        "custom_limits": limits
+    }
+
+@app.delete("/admin/user/{username}/limits")
+async def admin_delete_user_limits(
+    username: str,
+    current_admin: dict = Depends(get_current_admin)
+):
+    """[Admin] ลบ custom limits ของ user (ใช้ default)"""
+    user = db.get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    success = db.delete_user_limits(username)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete user limits")
+    
+    return {
+        "message": f"ลบ custom limits สำหรับ {username} สำเร็จ (ใช้ default limits)",
+        "username": username
+    }
+
 @app.get("/user/session")
 async def get_user_session(current_user: dict = Depends(get_current_user)):
     """ดึง session ของ user ปัจจุบัน"""
@@ -257,7 +327,9 @@ async def get_user_session(current_user: dict = Depends(get_current_user)):
     
     # Get usage
     usage = session_manager.get_session_usage(session_id)
-    limits = session_manager.get_limits()
+    
+    # Get limits for this specific user (custom or default)
+    limits = session_manager.get_limits_for_session(session_id)
     
     return {
         "session_id": session_id,

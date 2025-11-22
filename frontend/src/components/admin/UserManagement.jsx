@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { getUsers, createUser, deleteUser } from '../../services/adminApi';
-import { Users, UserPlus, Trash2, RefreshCw } from 'lucide-react';
+import { Users, UserPlus, Trash2, RefreshCw, Settings } from 'lucide-react';
+import UserQuotaModal from './UserQuotaModal';
 
 const UserManagement = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -50,6 +53,20 @@ const UserManagement = () => {
       console.error('Error deleting user:', error);
       alert(error.response?.data?.detail || 'ไม่สามารถลบ user ได้');
     }
+  };
+
+  const handleOpenQuotaModal = (username) => {
+    setSelectedUser(username);
+    setShowQuotaModal(true);
+  };
+
+  const handleCloseQuotaModal = () => {
+    setShowQuotaModal(false);
+    setSelectedUser(null);
+  };
+
+  const handleQuotaSuccess = () => {
+    loadUsers();
   };
 
   useEffect(() => {
@@ -158,6 +175,9 @@ const UserManagement = () => {
                 Role
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Quota
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 สร้างเมื่อ
               </th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -180,23 +200,53 @@ const UserManagement = () => {
                     {user.role}
                   </span>
                 </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                  {user.custom_limits ? (
+                    <span className="text-blue-600 font-medium">
+                      {user.custom_limits.maxVideos}/{user.custom_limits.maxDurationMinutes}m/{user.custom_limits.maxFileSizeMB}MB
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">Default</span>
+                  )}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {new Date(user.created_at).toLocaleString('th-TH')}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button
-                    onClick={() => handleDeleteUser(user.username)}
-                    className="text-red-600 hover:text-red-900 flex items-center justify-end ml-auto"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    ลบ
-                  </button>
+                  <div className="flex items-center justify-end space-x-2">
+                    {user.role !== 'admin' && (
+                      <button
+                        onClick={() => handleOpenQuotaModal(user.username)}
+                        className="text-blue-600 hover:text-blue-900 flex items-center"
+                        title="ตั้งค่า Quota"
+                      >
+                        <Settings className="h-4 w-4 mr-1" />
+                        Quota
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteUser(user.username)}
+                      className="text-red-600 hover:text-red-900 flex items-center"
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      ลบ
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Quota Modal */}
+      {showQuotaModal && selectedUser && (
+        <UserQuotaModal
+          username={selectedUser}
+          onClose={handleCloseQuotaModal}
+          onSuccess={handleQuotaSuccess}
+        />
+      )}
     </div>
   );
 };

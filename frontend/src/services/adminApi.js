@@ -44,3 +44,19 @@ export const reloadLimits = async () => {
   const response = await axios.post(`${API_URL}/admin/reload-limits`);
   return response.data;
 };
+
+// User Limits Management
+export const getUserLimits = async (username) => {
+  const response = await axios.get(`${API_URL}/admin/user/${username}/limits`);
+  return response.data;
+};
+
+export const setUserLimits = async (username, limits) => {
+  const response = await axios.put(`${API_URL}/admin/user/${username}/limits`, limits);
+  return response.data;
+};
+
+export const deleteUserLimits = async (username) => {
+  const response = await axios.delete(`${API_URL}/admin/user/${username}/limits`);
+  return response.data;
+};

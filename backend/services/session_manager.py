@@ -54,12 +54,32 @@ class SessionManager:
         """ดึงข้อมูลการใช้งานของ session"""
         usage = self.db.get_session_usage(session_id)
         
+        # Get limits for this session (custom or default)
+        limits = self.get_limits_for_session(session_id)
+        
         return {
             "videos_count": usage["videos_count"],
             "total_duration": usage["total_duration"],
-            "remaining_videos": self.limits["maxVideos"] - usage["videos_count"],
-            "remaining_duration": (self.limits["maxDurationMinutes"] * 60) - usage["total_duration"]
+            "remaining_videos": limits["maxVideos"] - usage["videos_count"],
+            "remaining_duration": (limits["maxDurationMinutes"] * 60) - usage["total_duration"]
         }
+    
+    def get_limits_for_session(self, session_id: str) -> dict:
+        """ดึง limits สำหรับ session (ใช้ custom limits ถ้ามี)"""
+        # Extract username from session_id (format: user_username)
+        if session_id.startswith("user_"):
+            username = session_id.replace("user_", "")
+            user = self.db.get_user(username)
+            
+            if user and user.get("custom_limits"):
+                # ใช้ custom limits ของ user
+                print(f"✅ Using custom limits for {username}: {user['custom_limits']}")
+                return user["custom_limits"]
+            else:
+                print(f"ℹ️ No custom limits for {username}, using default")
+        
+        # ใช้ default limits
+        return self.limits
     
     def can_upload(self, session_id: str, file_size_mb: float, duration_seconds: float = 0) -> tuple[bool, str]:
         """
@@ -68,22 +88,25 @@ class SessionManager:
         Returns:
             tuple: (can_upload: bool, error_message: str)
         """
+        # Get limits for this session (custom or default)
+        limits = self.get_limits_for_session(session_id)
+        
         # Check file size
-        if file_size_mb > self.limits["maxFileSizeMB"]:
-            return False, f"ขนาดไฟล์เกิน {self.limits['maxFileSizeMB']} MB (ไฟล์ของคุณ: {file_size_mb:.2f} MB)"
+        if file_size_mb > limits["maxFileSizeMB"]:
+            return False, f"ขนาดไฟล์เกิน {limits['maxFileSizeMB']} MB (ไฟล์ของคุณ: {file_size_mb:.2f} MB)"
         
         # Get session usage from database
         usage = self.db.get_session_usage(session_id)
         
         # Check video count
-        if usage["videos_count"] >= self.limits["maxVideos"]:
-            return False, f"คุณ upload ครบ {self.limits['maxVideos']} วิดีโอแล้ว"
+        if usage["videos_count"] >= limits["maxVideos"]:
+            return False, f"คุณ upload ครบ {limits['maxVideos']} วิดีโอแล้ว"
         
         # Check duration (if provided)
         if duration_seconds > 0:
-            max_duration = self.limits["maxDurationMinutes"] * 60
+            max_duration = limits["maxDurationMinutes"] * 60
             if duration_seconds > max_duration:
-                return False, f"ความยาววิดีโอเกิน {self.limits['maxDurationMinutes']} นาที (วิดีโอของคุณ: {duration_seconds/60:.2f} นาที)"
+                return False, f"ความยาววิดีโอเกิน {limits['maxDurationMinutes']} นาที (วิดีโอของคุณ: {duration_seconds/60:.2f} นาที)"
         
         return True, ""
     

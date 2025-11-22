@@ -10,39 +10,46 @@ const VideoUploader = ({ onVideoUploaded }) => {
   const [usage, setUsage] = useState(null)
   const [sessionId, setSessionId] = useState(null)
 
-  // Load limits on mount
+  // Load user session (includes limits and usage)
   useEffect(() => {
-    const loadLimits = async () => {
+    const loadUserSession = async () => {
       try {
-        const response = await axios.get('/api/limits')
-        setLimits(response.data)
+        // Get user session from backend (includes custom limits)
+        const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/user/session`)
+        const data = response.data
+        
+        // Set session ID, limits, and usage
+        setSessionId(data.session_id)
+        setLimits(data.limits)
+        setUsage(data.usage)
+        
+        console.log('✅ Loaded user session:', data)
+        console.log('   Limits:', data.limits)
+        console.log('   Usage:', data.usage)
       } catch (err) {
-        console.error('Failed to load limits:', err)
+        console.error('Failed to load user session:', err)
+        // Fallback to default limits
+        try {
+          const limitsResponse = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/limits`)
+          setLimits(limitsResponse.data)
+        } catch (limitsErr) {
+          console.error('Failed to load limits:', limitsErr)
+        }
       }
     }
-    loadLimits()
-
-    // Get or create session ID from sessionStorage
-    let storedSessionId = sessionStorage.getItem('video_session_id')
-    if (!storedSessionId) {
-      storedSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      sessionStorage.setItem('video_session_id', storedSessionId)
-    }
-    setSessionId(storedSessionId)
+    
+    loadUserSession()
   }, [])
-
-  // Load usage when session ID is available
-  useEffect(() => {
-    if (sessionId) {
-      loadUsage()
-    }
-  }, [sessionId])
 
   const loadUsage = async () => {
     if (!sessionId) return
     try {
-      const response = await axios.get(`/api/session/${sessionId}/usage`)
+      const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/session/${sessionId}/usage`)
       setUsage(response.data.usage)
+      // Also update limits in case they changed
+      if (response.data.limits) {
+        setLimits(response.data.limits)
+      }
     } catch (err) {
       console.error('Failed to load usage:', err)
     }
@@ -93,7 +100,7 @@ const VideoUploader = ({ onVideoUploaded }) => {
       }
 
       // Upload video
-      const response = await axios.post('/api/upload-video', formData, {
+      const response = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/upload-video`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -111,10 +118,13 @@ const VideoUploader = ({ onVideoUploaded }) => {
         sessionStorage.setItem('video_session_id', response.data.session_id)
       }
 
-      // Update usage
+      // Update usage and limits (in case custom limits changed)
       if (response.data.usage) {
         setUsage(response.data.usage)
       }
+      
+      // Reload usage to get updated limits
+      await loadUsage()
 
       // MP3 conversion is already complete when we get the response
       onVideoUploaded(response.data)
