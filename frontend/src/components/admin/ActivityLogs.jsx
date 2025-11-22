@@ -46,7 +46,12 @@ const ActivityLogs = () => {
   };
 
   useEffect(() => {
-    loadActivities();
+    // Debounce for username filter (wait 500ms after user stops typing)
+    const timeoutId = setTimeout(() => {
+      loadActivities();
+    }, filters.username ? 500 : 0);
+
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, filters.activity_type, filters.username, filters.status, filters.date_from, filters.date_to]);
 
